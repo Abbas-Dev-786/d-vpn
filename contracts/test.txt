@@ -1,0 +1,42 @@
+
+
+  DVPN Smart Contract
+    1) should successfully log a session and compute homomorphic earnings for provider
+    2) should prevent unauthorized addresses from decrypting the provider balance
+
+
+  0 passing (106ms)
+  2 failing
+
+  1) DVPN Smart Contract
+       should successfully log a session and compute homomorphic earnings for provider:
+     Error: FHEVM access permission verification error 'ACLNotAllowed()' while calling FHE operator: The contract or account at 0x5FbDB2315678afecb367f032d93F642f64180aa3 is attempting to call an FHE operator (e.g., add, and, xor, etc.) using the handle 0xa4ba2d991d7a0d6dc327baba2fcd23f1ecedc51092000000000000007a690500, but does not have the required FHE access permissions. To grant access to a <handle> for a contract at <contract address>, call: FHE.allow(<contract address>, <handle>).
+    at FHEVMExecutor.<unknown> (0xe3a9105a3a932253a70f126eb1e3b589c643dd24, @fhevm/host-contracts/contracts/FHEVMExecutor.sol:0:0)
+    at DVPN.sub (@fhevm/solidity/lib/Impl.sol:453)
+    at DVPN.sub (@fhevm/solidity/lib/FHE.sol:3702)
+    at DVPN.endConfidentialSession (contracts/DVPN.sol:65)
+    at EdrProviderWrapper.request (node_modules\hardhat\src\internal\hardhat-network\provider\provider.ts:453:41)
+    at async FhevmProviderExtender._handleEthSendTransaction (node_modules\@fhevm\hardhat-plugin\src\internal\provider\FhevmProviderExtender.ts:110:14)
+    at async HardhatEthersSigner.sendTransaction (node_modules\@nomicfoundation\hardhat-ethers\src\signers.ts:185:18)
+    at async send (node_modules\ethers\src.ts\contract\contract.ts:313:20)
+    at async Proxy.endConfidentialSession (node_modules\ethers\src.ts\contract\contract.ts:352:16)
+    at async Context.<anonymous> (test\DVPN.ts:62:19)
+  
+
+  2) DVPN Smart Contract
+       should prevent unauthorized addresses from decrypting the provider balance:
+     Error: FHEVM access permission verification error 'ACLNotAllowed()' while calling FHE operator: The contract or account at 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 is attempting to call an FHE operator (e.g., add, and, xor, etc.) using the handle 0xdd4b426726e7fff292d09cc4985eed877bc7d372ce000000000000007a690500, but does not have the required FHE access permissions. To grant access to a <handle> for a contract at <contract address>, call: FHE.allow(<contract address>, <handle>).
+    at FHEVMExecutor.<unknown> (0xe3a9105a3a932253a70f126eb1e3b589c643dd24, @fhevm/host-contracts/contracts/FHEVMExecutor.sol:0:0)
+    at DVPN.sub (@fhevm/solidity/lib/Impl.sol:453)
+    at DVPN.sub (@fhevm/solidity/lib/FHE.sol:3702)
+    at DVPN.endConfidentialSession (contracts/DVPN.sol:65)
+    at EdrProviderWrapper.request (node_modules\hardhat\src\internal\hardhat-network\provider\provider.ts:453:41)
+    at async FhevmProviderExtender._handleEthSendTransaction (node_modules\@fhevm\hardhat-plugin\src\internal\provider\FhevmProviderExtender.ts:110:14)
+    at async HardhatEthersSigner.sendTransaction (node_modules\@nomicfoundation\hardhat-ethers\src\signers.ts:185:18)
+    at async send (node_modules\ethers\src.ts\contract\contract.ts:313:20)
+    at async Proxy.endConfidentialSession (node_modules\ethers\src.ts\contract\contract.ts:352:16)
+    at async Context.<anonymous> (test\DVPN.ts:97:12)
+  
+
+
+
