@@ -14,4 +14,6 @@ export interface FlowAuthRequest {
   credential?: string;
   /** Optional existing Flow account address */
   userAddress?: string;
+  /** Optional existing EVM address to bind to this Flow user */
+  userEvmAddress?: string;
 }

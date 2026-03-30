@@ -14,7 +14,7 @@ import {
 } from "@/api"
 import { useQueryClient } from "@tanstack/react-query"
 import { FheBadge } from "@/components/fhe-badge"
-import { encryptSessionTime } from "@/lib/fhe"
+import { encryptSessionTime, getDvpnContractAddress, getImporterAddress } from "@/lib/fhe"
 import { format } from "date-fns"
 import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -98,18 +98,20 @@ export default function Dashboard() {
   const handleToggleVpn = async () => {
     if (!user) return
 
-    // In a real app, this should be the deployed DVPN.sol address and fetched natively
-    const CONTRACT_ADDRESS = "0x00000000000000000000000000000000DVPNMOCK"
+    const CONTRACT_ADDRESS = getDvpnContractAddress()
+    const IMPORTER_ADDRESS = getImporterAddress()
 
     if (activeSessionId) {
       try {
-        const { handle, inputProof } = await encryptSessionTime(CONTRACT_ADDRESS, user.userAddress, Date.now())
+        const encryptedEndTime = await encryptSessionTime(
+          CONTRACT_ADDRESS,
+          IMPORTER_ADDRESS,
+          Date.now(),
+        )
         endMutation.mutate({
           data: {
             sessionId: activeSessionId,
-            // For now, we will just send the handle if backend schema takes 1 string, or stringified payload
-            // Ideally backend schema will be updated to accept handle + proof
-            encryptedEndTime: JSON.stringify({ handle, inputProof })
+            encryptedEndTime,
           }
         })
       } catch (err) {
@@ -122,12 +124,17 @@ export default function Dashboard() {
         return
       }
       try {
-        const { handle, inputProof } = await encryptSessionTime(CONTRACT_ADDRESS, user.userAddress, Date.now())
+        const encryptedStartTime = await encryptSessionTime(
+          CONTRACT_ADDRESS,
+          IMPORTER_ADDRESS,
+          Date.now(),
+        )
         startMutation.mutate({
           data: {
-            userAddress: user.userAddress,
+            flowUserAddress: user.userAddress,
+            userEvmAddress: user.evmAddress,
             nodeId: firstNode.nodeId,
-            encryptedStartTime: JSON.stringify({ handle, inputProof })
+            encryptedStartTime,
           }
         })
       } catch (err) {

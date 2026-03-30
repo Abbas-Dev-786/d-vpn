@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const nodesTable = pgTable("nodes", {
   nodeId: text("node_id").primaryKey(),
   address: text("address").notNull(),
+  flowAddress: text("flow_address"),
   name: text("name").notNull(),
   location: text("location").notNull(),
   isActive: boolean("is_active").notNull().default(true),

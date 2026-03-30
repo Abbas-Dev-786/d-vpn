@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
+import { ethers } from "ethers";
 import { db } from "../config/db";
 import { nodesTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
@@ -23,6 +24,7 @@ router.get(
     res.json({
       nodes: nodes.map((n) => ({
         ...n,
+        evmAddress: n.address,
         uptimePercent: parseFloat(String(n.uptimePercent)),
         registeredAt: n.registeredAt.toISOString(),
       })),
@@ -34,16 +36,26 @@ router.get(
 router.post(
   "/nodes",
   asyncHandler(async (req, res) => {
-    const { address, name, location } = req.body as {
-      address: string;
+    const { address, evmAddress, flowAddress, name, location } = req.body as {
+      address?: string;
+      evmAddress?: string;
+      flowAddress?: string;
       name: string;
       location: string;
     };
+    const resolvedEvmAddress = evmAddress ?? address;
 
-    if (!address || !name || !location) {
+    if (!resolvedEvmAddress || !name || !location) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "address, name, and location are required",
+        message: "evmAddress (or address), name, and location are required",
+      });
+      return;
+    }
+    if (!ethers.isAddress(resolvedEvmAddress)) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "evmAddress must be a valid EVM address",
       });
       return;
     }
@@ -56,7 +68,8 @@ router.post(
         .insert(nodesTable)
         .values({
           nodeId,
-          address,
+          address: ethers.getAddress(resolvedEvmAddress),
+          flowAddress: flowAddress ?? null,
           name,
           location,
           isActive: true,
@@ -73,6 +86,7 @@ router.post(
 
       res.status(201).json({
         ...node,
+        evmAddress: node.address,
         uptimePercent: parseFloat(String(node.uptimePercent)),
         registeredAt: node.registeredAt.toISOString(),
       });
@@ -90,7 +104,8 @@ router.post(
   "/nodes/:nodeId/withdraw",
   asyncHandler(async (req, res) => {
     const { nodeId } = req.params;
-    const { callerAddress } = req.body as { callerAddress?: string };
+    const { callerAddress, callerEvmAddress } = req.body as { callerAddress?: string; callerEvmAddress?: string };
+    const resolvedCaller = callerEvmAddress ?? callerAddress;
 
     const existing = await db
       .select()
@@ -107,12 +122,13 @@ router.post(
 
     // Authorization: only the node's registered owner address may withdraw
     if (
-      !callerAddress ||
-      node.address.toLowerCase() !== callerAddress.toLowerCase()
+      !resolvedCaller ||
+      !ethers.isAddress(resolvedCaller) ||
+      node.address.toLowerCase() !== resolvedCaller.toLowerCase()
     ) {
       res.status(403).json({
         error: "FORBIDDEN",
-        message: "Caller address does not match node owner",
+        message: "Caller EVM address does not match node owner",
       });
       return;
     }

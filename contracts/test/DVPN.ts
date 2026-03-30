@@ -13,7 +13,8 @@ type Signers = {
 async function deployFixture() {
   const ratePerSecond = 5; // e.g. 5 tokens per second
   const factory = (await ethers.getContractFactory("DVPN")) as DVPN__factory;
-  const dvpnContract = (await factory.deploy(ratePerSecond)) as DVPN;
+  const trustedRelayer = await (await ethers.getSigners())[0].getAddress();
+  const dvpnContract = (await factory.deploy(ratePerSecond, trustedRelayer)) as DVPN;
   const dvpnContractAddress = await dvpnContract.getAddress();
 
   return { dvpnContract, dvpnContractAddress, ratePerSecond };
@@ -49,7 +50,7 @@ describe("DVPN Smart Contract", function () {
 
     const startTx = await dvpnContract
       .connect(signers.alice)
-      .startSession(signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof);
+      .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof);
     await startTx.wait();
 
     // 2. Session end
@@ -85,7 +86,11 @@ describe("DVPN Smart Contract", function () {
       .add64(clearStartTime)
       .encrypt();
 
-    await (await dvpnContract.connect(signers.alice).startSession(signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof)).wait();
+    await (
+      await dvpnContract
+        .connect(signers.alice)
+        .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof)
+    ).wait();
 
     const clearEndTime = 600;
     const encryptedEndTime = await fhevm
@@ -112,5 +117,18 @@ describe("DVPN Smart Contract", function () {
     }
 
     expect(decryptionError).to.be.true; // Alice should be denied
+  });
+
+  it("should reject relayer submission when ciphertext importer is not the relayer", async function () {
+    const encryptedStartTime = await fhevm
+      .createEncryptedInput(dvpnContractAddress, signers.alice.address)
+      .add64(1234)
+      .encrypt();
+
+    await expect(
+      dvpnContract
+        .connect(signers.deployer)
+        .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof),
+    ).to.be.reverted;
   });
 });

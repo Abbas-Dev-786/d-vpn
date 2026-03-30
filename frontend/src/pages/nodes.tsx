@@ -16,14 +16,14 @@ export default function Nodes() {
   const queryClient = useQueryClient()
 
   const [isRegistering, setIsRegistering] = React.useState(false)
-  const [formData, setFormData] = React.useState({ name: "", address: "", location: "" })
+  const [formData, setFormData] = React.useState({ name: "", evmAddress: "", flowAddress: "", location: "" })
 
   const registerMutation = useRegisterNode({
     mutation: {
       onSuccess: () => {
         toast({ title: "Node Registered", description: "Your node is now part of the Confidential-X4PN network.", variant: "success" })
         setIsRegistering(false)
-        setFormData({ name: "", address: "", location: "" })
+        setFormData({ name: "", evmAddress: "", flowAddress: "", location: "" })
         queryClient.invalidateQueries({ queryKey: getListNodesQueryKey() })
       },
       onError: (err) => toast({ title: "Registration Failed", description: err.message, variant: "destructive" })
@@ -46,11 +46,18 @@ export default function Nodes() {
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.name || !formData.address || !formData.location) {
-      toast({ title: "Validation Error", description: "All fields are required", variant: "destructive" })
+    if (!formData.name || !formData.evmAddress || !formData.location) {
+      toast({ title: "Validation Error", description: "Name, EVM address, and location are required", variant: "destructive" })
       return
     }
-    registerMutation.mutate({ data: formData })
+    registerMutation.mutate({
+      data: {
+        name: formData.name,
+        location: formData.location,
+        evmAddress: formData.evmAddress,
+        flowAddress: formData.flowAddress || undefined,
+      },
+    })
   }
 
   return (
@@ -79,7 +86,7 @@ export default function Nodes() {
             <CardDescription>Join the network and earn FLOW tokens blindly.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleRegister} className="grid md:grid-cols-4 gap-4 items-end">
+            <form onSubmit={handleRegister} className="grid md:grid-cols-5 gap-4 items-end">
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Node Name</label>
                 <Input
@@ -89,11 +96,11 @@ export default function Nodes() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Flow Address</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider EVM Address</label>
                 <Input
                   placeholder="0x..."
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  value={formData.evmAddress}
+                  onChange={(e) => setFormData({ ...formData, evmAddress: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
@@ -102,6 +109,14 @@ export default function Nodes() {
                   placeholder="e.g. Frankfurt, DE"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Flow Address (Optional)</label>
+                <Input
+                  placeholder="0x..."
+                  value={formData.flowAddress}
+                  onChange={(e) => setFormData({ ...formData, flowAddress: e.target.value })}
                 />
               </div>
               <Button type="submit" disabled={registerMutation.isPending} className="w-full">
@@ -162,7 +177,7 @@ export default function Nodes() {
                 <Button
                   variant="outline"
                   className="w-full text-xs h-9"
-                  onClick={() => withdrawMutation.mutate({ nodeId: node.nodeId, data: { callerAddress: user?.userAddress ?? node.address } })}
+                  onClick={() => withdrawMutation.mutate({ nodeId: node.nodeId, data: { callerEvmAddress: user?.evmAddress ?? node.address } })}
                   disabled={withdrawMutation.isPending || withdrawMutation.variables?.nodeId === node.nodeId}
                 >
                   <DollarSign className="w-3 h-3 mr-1" />

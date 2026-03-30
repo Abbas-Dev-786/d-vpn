@@ -3,7 +3,8 @@ import * as fcl from "@onflow/fcl"
 import "../flow/config"
 
 interface AuthUser {
-  userAddress: string;
+  userAddress: string; // Flow address
+  evmAddress: string;
   displayName?: string;
   sessionToken: string;
 }
@@ -21,17 +22,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null)
 
   React.useEffect(() => {
-    fcl.currentUser.subscribe((currentUser: any) => {
+    const unsubscribe = fcl.currentUser.subscribe(async (currentUser: any) => {
       if (currentUser?.loggedIn) {
-        setUser({
-          userAddress: currentUser.addr,
-          displayName: currentUser.addr,
-          sessionToken: "flow_session" // placeholder logic
-        })
+        try {
+          const response = await fetch("/api/auth/flow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              method: "passkey",
+              userAddress: currentUser.addr,
+            }),
+          });
+          const auth = await response.json();
+
+          setUser({
+            userAddress: auth.userAddress ?? currentUser.addr,
+            evmAddress: auth.userEvmAddress,
+            displayName: auth.displayName ?? currentUser.addr,
+            sessionToken: auth.sessionToken ?? "flow_session",
+          });
+        } catch {
+          setUser(null);
+        }
       } else {
         setUser(null)
       }
-    })
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
   }, [])
 
   const login = () => {

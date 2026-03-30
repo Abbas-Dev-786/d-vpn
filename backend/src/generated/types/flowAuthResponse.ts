@@ -11,6 +11,8 @@ export interface FlowAuthResponse {
   userAddress: string;
   displayName?: string;
   flowAccountId?: string;
+  /** Mapped EVM address used for Zama host-chain interactions */
+  userEvmAddress: string;
   sessionToken: string;
   isNewUser: boolean;
 }

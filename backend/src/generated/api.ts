@@ -34,6 +34,7 @@ export const FlowAuthResponse = zod.object({
   userAddress: zod.string().describe("Flow account address"),
   displayName: zod.string().optional(),
   flowAccountId: zod.string().optional(),
+  userEvmAddress: zod.string().describe("Mapped EVM address used on Zama host chain"),
   sessionToken: zod.string(),
   isNewUser: zod.boolean(),
 });
@@ -43,11 +44,15 @@ export const FlowAuthResponse = zod.object({
  * @summary Start a confidential VPN session
  */
 export const StartSessionBody = zod.object({
-  userAddress: zod.string().describe("User's Flow account address"),
+  flowUserAddress: zod.string().describe("User's Flow account address"),
+  userEvmAddress: zod.string().describe("Mapped EVM address for Zama-host-chain tx context"),
   nodeId: zod.string().describe("Selected VPN node ID"),
-  encryptedStartTime: zod
-    .string()
-    .describe("FHE-encrypted timestamp (euint64 ciphertext, hex encoded)"),
+  encryptedStartTime: zod.object({
+    handle: zod.string(),
+    inputProof: zod.string(),
+    importerAddress: zod.string(),
+    source: zod.literal("relayer-sdk").optional(),
+  }),
 });
 
 /**
@@ -56,14 +61,18 @@ export const StartSessionBody = zod.object({
  */
 export const EndSessionBody = zod.object({
   sessionId: zod.string(),
-  encryptedEndTime: zod
-    .string()
-    .describe("FHE-encrypted end timestamp (euint64 ciphertext, hex encoded)"),
+  encryptedEndTime: zod.object({
+    handle: zod.string(),
+    inputProof: zod.string(),
+    importerAddress: zod.string(),
+    source: zod.literal("relayer-sdk").optional(),
+  }),
 });
 
 export const EndSessionResponse = zod.object({
   sessionId: zod.string(),
   userAddress: zod.string(),
+  userEvmAddress: zod.string().nullish(),
   nodeId: zod.string(),
   status: zod.enum(["active", "ended", "settled"]),
   encryptedStartTime: zod
@@ -150,6 +159,8 @@ export const ListNodesResponse = zod.object({
     zod.object({
       nodeId: zod.string(),
       address: zod.string().describe("Node provider wallet address"),
+      evmAddress: zod.string().optional(),
+      flowAddress: zod.string().nullish(),
       name: zod.string(),
       location: zod
         .string()
@@ -172,7 +183,8 @@ export const ListNodesResponse = zod.object({
  * @summary Register a new VPN node
  */
 export const RegisterNodeBody = zod.object({
-  address: zod.string(),
+  evmAddress: zod.string(),
+  flowAddress: zod.string().optional(),
   name: zod.string(),
   location: zod.string(),
 });
@@ -186,7 +198,7 @@ export const WithdrawNodeEarningsParams = zod.object({
 });
 
 export const WithdrawNodeEarningsBody = zod.object({
-  callerAddress: zod
+  callerEvmAddress: zod
     .string()
     .describe(
       "The wallet address of the caller. Must match the node's registered owner address.",

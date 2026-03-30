@@ -7,7 +7,10 @@
  */
 
 export interface RegisterNodeRequest {
-  address: string;
+  /** Provider EVM address used for on-chain ACL and settlements */
+  evmAddress: string;
+  /** Optional Flow account used for walletless identity */
+  flowAddress?: string;
   name: string;
   location: string;
 }

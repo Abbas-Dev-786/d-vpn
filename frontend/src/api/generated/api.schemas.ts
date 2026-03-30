@@ -34,6 +34,8 @@ export interface FlowAuthRequest {
   credential?: string;
   /** Optional existing Flow account address */
   userAddress?: string;
+  /** Optional existing EVM address */
+  userEvmAddress?: string;
 }
 
 export interface FlowAuthResponse {
@@ -41,23 +43,34 @@ export interface FlowAuthResponse {
   userAddress: string;
   displayName?: string;
   flowAccountId?: string;
+  /** Mapped EVM address used for Zama host-chain interactions */
+  userEvmAddress: string;
   sessionToken: string;
   isNewUser: boolean;
 }
 
+export interface EncryptedInputPayload {
+  handle: string;
+  inputProof: string;
+  importerAddress: string;
+  source?: "relayer-sdk";
+}
+
 export interface StartSessionRequest {
   /** User's Flow account address */
-  userAddress: string;
+  flowUserAddress: string;
+  /** EVM address used for Zama host-chain transactions */
+  userEvmAddress: string;
   /** Selected VPN node ID */
   nodeId: string;
-  /** FHE-encrypted timestamp (euint64 ciphertext, hex encoded) */
-  encryptedStartTime: string;
+  /** FHE encrypted payload generated via Zama relayer-sdk */
+  encryptedStartTime: EncryptedInputPayload;
 }
 
 export interface EndSessionRequest {
   sessionId: string;
-  /** FHE-encrypted end timestamp (euint64 ciphertext, hex encoded) */
-  encryptedEndTime: string;
+  /** FHE encrypted payload generated via Zama relayer-sdk */
+  encryptedEndTime: EncryptedInputPayload;
 }
 
 export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
@@ -71,6 +84,7 @@ export const SessionStatus = {
 export interface Session {
   sessionId: string;
   userAddress: string;
+  userEvmAddress?: string | null;
   nodeId: string;
   status: SessionStatus;
   /** FHE-encrypted start timestamp (euint64 ciphertext) */
@@ -96,6 +110,10 @@ export interface Node {
   nodeId: string;
   /** Node provider wallet address */
   address: string;
+  /** Canonical node provider EVM address */
+  evmAddress?: string;
+  /** Optional Flow identity for the provider */
+  flowAddress?: string | null;
   name: string;
   /** Geographic location label (e.g., "Frankfurt, DE") */
   location: string;
@@ -113,14 +131,15 @@ export interface NodeListResponse {
 }
 
 export interface RegisterNodeRequest {
-  address: string;
+  evmAddress: string;
+  flowAddress?: string;
   name: string;
   location: string;
 }
 
 export interface WithdrawNodeEarningsBody {
-  /** The wallet address of the caller. Must match the node's registered owner address. */
-  callerAddress: string;
+  /** The caller EVM address. Must match the node's registered EVM owner address. */
+  callerEvmAddress: string;
 }
 
 export type WithdrawResponseStatus =

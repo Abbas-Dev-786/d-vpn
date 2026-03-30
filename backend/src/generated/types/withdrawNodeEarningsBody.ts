@@ -7,6 +7,6 @@
  */
 
 export interface WithdrawNodeEarningsBody {
-  /** The wallet address of the caller. Must match the node's registered owner address. */
-  callerAddress: string;
+  /** The caller's EVM address. Must match the node's registered EVM owner address. */
+  callerEvmAddress: string;
 }

@@ -1,4 +1,3 @@
-import * as React from "react"
 import { Lock } from "lucide-react"
 import { truncateFhe } from "@/lib/fhe"
 import { cn } from "@/lib/utils"

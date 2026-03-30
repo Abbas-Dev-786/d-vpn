@@ -10,6 +10,10 @@ export interface Node {
   nodeId: string;
   /** Node provider wallet address */
   address: string;
+  /** Canonical provider EVM address */
+  evmAddress?: string;
+  /** Optional Flow identity address for the provider */
+  flowAddress?: string | null;
   name: string;
   /** Geographic location label (e.g., "Frankfurt, DE") */
   location: string;

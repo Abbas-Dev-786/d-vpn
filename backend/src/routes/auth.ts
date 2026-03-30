@@ -1,13 +1,21 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
+import { ethers } from "ethers";
 
 const router: IRouter = Router();
+const userIdentityMap = new Map<string, string>();
+
+const createMockEvmAddress = (): string => {
+  const hex = randomUUID().replace(/-/g, "").padEnd(40, "0").slice(0, 40);
+  return ethers.getAddress(`0x${hex}`);
+};
 
 router.post("/auth/flow", (req, res) => {
-  const { method, credential, userAddress } = req.body as {
+  const { method, credential, userAddress, userEvmAddress } = req.body as {
     method: string;
     credential?: string;
     userAddress?: string;
+    userEvmAddress?: string;
   };
 
   if (!method) {
@@ -23,6 +31,14 @@ router.post("/auth/flow", (req, res) => {
 
   const isNewUser = !userAddress;
   const flowAccountId = userAddress ?? `0x${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  let resolvedUserEvmAddress = userIdentityMap.get(flowAccountId);
+  if (!resolvedUserEvmAddress) {
+    resolvedUserEvmAddress =
+      userEvmAddress && ethers.isAddress(userEvmAddress)
+        ? ethers.getAddress(userEvmAddress)
+        : createMockEvmAddress();
+    userIdentityMap.set(flowAccountId, resolvedUserEvmAddress);
+  }
   const displayName =
     method === "google"
       ? "Demo User (Google)"
@@ -38,6 +54,7 @@ router.post("/auth/flow", (req, res) => {
     userAddress: flowAccountId,
     displayName,
     flowAccountId,
+    userEvmAddress: resolvedUserEvmAddress,
     sessionToken,
     isNewUser,
   });

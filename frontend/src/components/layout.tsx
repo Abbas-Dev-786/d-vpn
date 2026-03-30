@@ -57,7 +57,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="hidden md:flex items-center gap-4">
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-xs font-mono border border-primary/20">
                     <Wallet className="w-3 h-3 text-primary" />
-                    <span className="text-primary/90">{user.userAddress.substring(0,6)}...{user.userAddress.substring(user.userAddress.length-4)}</span>
+                    <span className="text-primary/90">
+                      {user.evmAddress.substring(0, 6)}...{user.evmAddress.substring(user.evmAddress.length - 4)}
+                    </span>
                   </div>
                   <Button variant="ghost" size="icon" onClick={() => logout()} title="Disconnect Account">
                     <LogOut className="w-4 h-4" />
@@ -102,7 +104,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="pt-4 border-t border-border flex items-center justify-between">
              <div className="flex items-center gap-2 text-xs font-mono text-primary/80">
               <Wallet className="w-4 h-4" />
-              {user.userAddress}
+              {user.evmAddress}
             </div>
             <Button variant="ghost" size="sm" onClick={() => { logout(); setMobileMenuOpen(false); }}>
               Disconnect
