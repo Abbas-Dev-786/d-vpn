@@ -14,7 +14,7 @@ import {
 } from "@/api"
 import { useQueryClient } from "@tanstack/react-query"
 import { FheBadge } from "@/components/fhe-badge"
-import { generateFheHash } from "@/lib/fhe"
+import { encryptSessionTime } from "@/lib/fhe"
 import { format } from "date-fns"
 import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -95,29 +95,44 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [sessionStartTime])
 
-  const handleToggleVpn = () => {
+  const handleToggleVpn = async () => {
     if (!user) return
 
+    // In a real app, this should be the deployed DVPN.sol address and fetched natively
+    const CONTRACT_ADDRESS = "0x00000000000000000000000000000000DVPNMOCK"
+
     if (activeSessionId) {
-      endMutation.mutate({
-        data: {
-          sessionId: activeSessionId,
-          encryptedEndTime: generateFheHash()
-        }
-      })
+      try {
+        const { handle, inputProof } = await encryptSessionTime(CONTRACT_ADDRESS, user.userAddress, Date.now())
+        endMutation.mutate({
+          data: {
+            sessionId: activeSessionId,
+            // For now, we will just send the handle if backend schema takes 1 string, or stringified payload
+            // Ideally backend schema will be updated to accept handle + proof
+            encryptedEndTime: JSON.stringify({ handle, inputProof })
+          }
+        })
+      } catch (err) {
+        toast({ title: "Encryption Failed", description: "Could not safely encrypt session end time", variant: "destructive" })
+      }
     } else {
       const firstNode = nodesData?.nodes?.[0]
       if (!firstNode) {
         toast({ title: "No Nodes Available", description: "Please wait or register a node first.", variant: "destructive" })
         return
       }
-      startMutation.mutate({
-        data: {
-          userAddress: user.userAddress,
-          nodeId: firstNode.nodeId,
-          encryptedStartTime: generateFheHash()
-        }
-      })
+      try {
+        const { handle, inputProof } = await encryptSessionTime(CONTRACT_ADDRESS, user.userAddress, Date.now())
+        startMutation.mutate({
+          data: {
+            userAddress: user.userAddress,
+            nodeId: firstNode.nodeId,
+            encryptedStartTime: JSON.stringify({ handle, inputProof })
+          }
+        })
+      } catch (err) {
+        toast({ title: "Encryption Failed", description: "Could not safely encrypt session start time", variant: "destructive" })
+      }
     }
   }
 

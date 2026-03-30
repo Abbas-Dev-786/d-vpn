@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "../config/db";
 import { sessionsTable, nodesTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
+import { startSessionOnChain, endSessionOnChain } from "../lib/zama-relayer";
 
 const router: IRouter = Router();
 
@@ -42,6 +43,9 @@ router.post(
       const sessionId = `sess_${randomUUID()}`;
       const now = new Date();
 
+      // Submit the Zama FHE payload to the smart contract using the trusted relayer
+      const txHash = await startSessionOnChain(userAddress, nodeId, encryptedStartTime);
+
       const [session] = await db
         .insert(sessionsTable)
         .values({
@@ -49,7 +53,7 @@ router.post(
           userAddress,
           nodeId,
           status: "active",
-          encryptedStartTime,
+          encryptedStartTime: txHash, // store the on-chain reference instead of the payload
           createdAt: now,
           updatedAt: now,
         })
@@ -111,14 +115,15 @@ router.post(
 
       const now = new Date();
       
-      // In a real app, encryptedDuration and encryptedAmount would be calculated 
-      // via FHE on the client or a trusted execution environment.
-      // Here we simulate the state update.
+      // Submit the Zama FHE payload to compute duration and payment homomorphically
+      // using the trusted relayer on behalf of the user
+      const txHash = await endSessionOnChain(existing[0].userAddress, encryptedEndTime);
+
       const [session] = await db
         .update(sessionsTable)
         .set({
           status: "ended",
-          encryptedEndTime,
+          encryptedEndTime: txHash,
           updatedAt: now,
         })
         .where(eq(sessionsTable.sessionId, sessionId))

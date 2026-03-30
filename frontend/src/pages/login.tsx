@@ -2,7 +2,6 @@ import * as React from "react"
 import { useLocation } from "wouter"
 import { motion } from "framer-motion"
 import { Fingerprint, MonitorSmartphone, Mail, ShieldCheck } from "lucide-react"
-import { useFlowAuth } from "@/api"
 import { useAuth } from "@/hooks/use-auth"
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
@@ -13,44 +12,23 @@ export default function Login() {
   const { login, isAuthenticated } = useAuth()
   const { toast } = useToast()
 
-  const authMutation = useFlowAuth({
-    mutation: {
-      onSuccess: (data) => {
-        login({
-          userAddress: data.userAddress,
-          displayName: data.displayName,
-          sessionToken: data.sessionToken
-        })
-        toast({
-          title: "Connected via Flow",
-          description: "Walletless onboarding successful.",
-          variant: "success"
-        })
-        setLocation("/dashboard")
-      },
-      onError: () => {
-        toast({
-          title: "Authentication Failed",
-          description: "Could not connect to Flow network.",
-          variant: "destructive"
-        })
-      }
-    }
-  })
-
   React.useEffect(() => {
     if (isAuthenticated) {
+      toast({
+        title: "Connected via Flow",
+        description: "Walletless onboarding successful.",
+        variant: "success"
+      })
       setLocation("/dashboard")
     }
-  }, [isAuthenticated, setLocation])
+  }, [isAuthenticated, setLocation, toast])
 
-  const handleLogin = (method: "passkey" | "google" | "apple" | "email") => {
-    authMutation.mutate({ data: { method } })
+  const handleLogin = () => {
+    login() // triggers Flow fcl.authenticate() discovery modal
   }
 
   return (
     <div className="relative min-h-[80vh] flex items-center justify-center">
-      {/* Background Graphic */}
       <div className="absolute inset-0 z-0 flex items-center justify-center opacity-30 pointer-events-none">
         <img
           src={`${import.meta.env.BASE_URL}images/cyberpunk-bg.png`}
@@ -84,12 +62,11 @@ export default function Login() {
           <CardContent className="space-y-4">
             <Button
               variant="outline"
-              className="w-full h-12 text-md flex items-center gap-3"
-              onClick={() => handleLogin("passkey")}
-              disabled={authMutation.isPending}
+              className="w-full h-12 text-md flex items-center gap-3 hover:bg-primary/20 hover:text-primary transition-all"
+              onClick={handleLogin}
             >
               <Fingerprint className="w-5 h-5" />
-              {authMutation.isPending ? "Connecting..." : "Use Passkey / Biometrics"}
+              Use Passkey / Biometrics
             </Button>
 
             <div className="relative py-4">
@@ -104,20 +81,18 @@ export default function Login() {
             <div className="grid grid-cols-2 gap-3">
               <Button
                 variant="outline"
-                className="w-full"
-                onClick={() => handleLogin("google")}
-                disabled={authMutation.isPending}
+                className="w-full hover:bg-secondary/20 hover:text-secondary transition-all"
+                onClick={handleLogin}
               >
-                <MonitorSmartphone className="w-4 h-4 mr-2 text-secondary" />
+                <MonitorSmartphone className="w-4 h-4 mr-2" />
                 Google
               </Button>
               <Button
                 variant="outline"
-                className="w-full"
-                onClick={() => handleLogin("email")}
-                disabled={authMutation.isPending}
+                className="w-full hover:bg-secondary/20 hover:text-secondary transition-all"
+                onClick={handleLogin}
               >
-                <Mail className="w-4 h-4 mr-2 text-secondary" />
+                <Mail className="w-4 h-4 mr-2" />
                 Email
               </Button>
             </div>

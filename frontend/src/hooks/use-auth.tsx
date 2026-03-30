@@ -1,4 +1,6 @@
 import * as React from "react"
+import * as fcl from "@onflow/fcl"
+import "../flow/config"
 
 interface AuthUser {
   userAddress: string;
@@ -8,7 +10,7 @@ interface AuthUser {
 
 interface AuthContextType {
   user: AuthUser | null;
-  login: (user: AuthUser) => void;
+  login: () => void;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -16,19 +18,28 @@ interface AuthContextType {
 const AuthContext = React.createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = React.useState<AuthUser | null>(() => {
-    const stored = localStorage.getItem("x4pn_auth")
-    return stored ? JSON.parse(stored) : null
-  })
+  const [user, setUser] = React.useState<AuthUser | null>(null)
 
-  const login = (newUser: AuthUser) => {
-    setUser(newUser)
-    localStorage.setItem("x4pn_auth", JSON.stringify(newUser))
+  React.useEffect(() => {
+    fcl.currentUser.subscribe((currentUser: any) => {
+      if (currentUser?.loggedIn) {
+        setUser({
+          userAddress: currentUser.addr,
+          displayName: currentUser.addr,
+          sessionToken: "flow_session" // placeholder logic
+        })
+      } else {
+        setUser(null)
+      }
+    })
+  }, [])
+
+  const login = () => {
+    fcl.authenticate()
   }
 
   const logout = () => {
-    setUser(null)
-    localStorage.removeItem("x4pn_auth")
+    fcl.unauthenticate()
   }
 
   return (
