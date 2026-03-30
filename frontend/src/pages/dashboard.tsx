@@ -115,7 +115,8 @@ export default function Dashboard() {
           }
         })
       } catch (err) {
-        toast({ title: "Encryption Failed", description: "Could not safely encrypt session end time", variant: "destructive" })
+        const message = err instanceof Error ? err.message : "Could not safely encrypt session end time";
+        toast({ title: "Encryption Failed", description: message, variant: "destructive" })
       }
     } else {
       const firstNode = nodesData?.nodes?.[0]
@@ -138,7 +139,8 @@ export default function Dashboard() {
           }
         })
       } catch (err) {
-        toast({ title: "Encryption Failed", description: "Could not safely encrypt session start time", variant: "destructive" })
+        const message = err instanceof Error ? err.message : "Could not safely encrypt session start time";
+        toast({ title: "Encryption Failed", description: message, variant: "destructive" })
       }
     }
   }

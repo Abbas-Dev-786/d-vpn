@@ -10,9 +10,48 @@ import { startSessionOnChain, endSessionOnChain, type EncryptedInputPayload } fr
 
 const router: IRouter = Router();
 const HASH_PREFIX = "0x";
+const LEGACY_PROVIDER_EVM_ENV = process.env.LEGACY_NODE_PROVIDER_EVM;
 
 const hashProof = (proof: string): string =>
   `${HASH_PREFIX}${createHash("sha256").update(proof).digest("hex")}`;
+
+const bytesLikeToHex = (
+  value: unknown,
+  fieldName: string,
+  expectedBytesLength?: number,
+): string => {
+  if (typeof value === "string") {
+    if (!ethers.isHexString(value, expectedBytesLength)) {
+      throw new Error(`Invalid ${fieldName}`);
+    }
+    return value;
+  }
+
+  if (value instanceof Uint8Array || Array.isArray(value)) {
+    const hex = ethers.hexlify(value as Uint8Array | number[]);
+    if (!ethers.isHexString(hex, expectedBytesLength)) {
+      throw new Error(`Invalid ${fieldName}`);
+    }
+    return hex;
+  }
+
+  if (value && typeof value === "object") {
+    const indexedEntries = Object.entries(value as Record<string, unknown>)
+      .filter(([k]) => /^\d+$/.test(k))
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    if (indexedEntries.length > 0) {
+      const bytes = Uint8Array.from(indexedEntries.map(([, v]) => Number(v)));
+      const hex = ethers.hexlify(bytes);
+      if (!ethers.isHexString(hex, expectedBytesLength)) {
+        throw new Error(`Invalid ${fieldName}`);
+      }
+      return hex;
+    }
+  }
+
+  throw new Error(`Invalid ${fieldName}`);
+};
 
 const normalizeEncryptedPayload = (
   value: string | EncryptedInputPayload,
@@ -20,22 +59,23 @@ const normalizeEncryptedPayload = (
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   const payload = parsed as Partial<EncryptedInputPayload>;
 
-  if (!payload.handle || !ethers.isHexString(payload.handle, 32)) {
-    throw new Error("Invalid encrypted handle");
-  }
-  if (!payload.inputProof || !ethers.isHexString(payload.inputProof)) {
-    throw new Error("Invalid encrypted input proof");
-  }
+  const handle = bytesLikeToHex(payload.handle, "encrypted handle", 32);
+  const inputProof = bytesLikeToHex(payload.inputProof, "encrypted input proof");
   if (!payload.importerAddress || !ethers.isAddress(payload.importerAddress)) {
     throw new Error("Invalid importer address");
   }
 
   return {
-    handle: payload.handle,
-    inputProof: payload.inputProof,
+    handle,
+    inputProof,
     importerAddress: payload.importerAddress,
     source: "relayer-sdk",
   };
+};
+
+const deriveLegacyProviderEvmAddress = (seed: string): string => {
+  const hash = ethers.keccak256(ethers.toUtf8Bytes(seed));
+  return ethers.getAddress(`0x${hash.slice(-40)}`);
 };
 
 router.post(
@@ -81,12 +121,20 @@ router.post(
           .json({ error: "NOT_FOUND", message: "Active node not found" });
         return;
       }
-      if (!ethers.isAddress(node[0].address)) {
-        res.status(500).json({
-          error: "INVALID_NODE_CONFIG",
-          message: "Selected node does not have a valid provider EVM address",
-        });
-        return;
+      let nodeProviderEvmAddress: string;
+      if (ethers.isAddress(node[0].address)) {
+        nodeProviderEvmAddress = ethers.getAddress(node[0].address);
+      } else {
+        // Backward compatibility for legacy DB rows created before EVM address validation.
+        const fallbackProvider = LEGACY_PROVIDER_EVM_ENV && ethers.isAddress(LEGACY_PROVIDER_EVM_ENV)
+          ? ethers.getAddress(LEGACY_PROVIDER_EVM_ENV)
+          : deriveLegacyProviderEvmAddress(node[0].nodeId);
+        nodeProviderEvmAddress = fallbackProvider;
+
+        await db
+          .update(nodesTable)
+          .set({ address: nodeProviderEvmAddress })
+          .where(eq(nodesTable.nodeId, node[0].nodeId));
       }
 
       const sessionId = `sess_${randomUUID()}`;
@@ -95,7 +143,7 @@ router.post(
       // Submit encrypted payload through the trusted relayer.
       const txHash = await startSessionOnChain(
         ethers.getAddress(userEvmAddress),
-        ethers.getAddress(node[0].address),
+        nodeProviderEvmAddress,
         normalizedPayload,
       );
 

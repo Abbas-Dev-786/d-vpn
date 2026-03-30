@@ -24,25 +24,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const unsubscribe = fcl.currentUser.subscribe(async (currentUser: any) => {
       if (currentUser?.loggedIn) {
+        const flowAddress = currentUser?.addr ?? "";
+
         try {
           const response = await fetch("/api/auth/flow", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               method: "passkey",
-              userAddress: currentUser.addr,
+              userAddress: flowAddress,
             }),
           });
-          const auth = await response.json();
+          const auth = response.ok ? await response.json() : {};
 
           setUser({
-            userAddress: auth.userAddress ?? currentUser.addr,
-            evmAddress: auth.userEvmAddress,
-            displayName: auth.displayName ?? currentUser.addr,
+            userAddress: auth.userAddress ?? flowAddress,
+            evmAddress: auth.userEvmAddress ?? flowAddress,
+            displayName: auth.displayName ?? flowAddress,
             sessionToken: auth.sessionToken ?? "flow_session",
           });
         } catch {
-          setUser(null);
+          setUser({
+            userAddress: flowAddress,
+            evmAddress: flowAddress,
+            displayName: flowAddress,
+            sessionToken: "flow_session",
+          });
         }
       } else {
         setUser(null)

@@ -7,7 +7,7 @@ const MOCK_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001";
 const DEFAULT_RELAYER = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 // In production these should be injected from `.env`.
-const RPC_URL = process.env.ZAMA_RPC_URL || "https://eth-sepolia.public.blastapi.io";
+const RPC_URL = process.env.ZAMA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
 const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || DEFAULT_RELAYER;
 const CONTRACT_ADDRESS = process.env.DVPN_CONTRACT_ADDRESS || MOCK_CONTRACT_ADDRESS;
 const MOCK_MODE = process.env.ZAMA_MOCK_MODE === "true" || CONTRACT_ADDRESS === MOCK_CONTRACT_ADDRESS;
@@ -23,23 +23,57 @@ let provider: ethers.Provider;
 let relayerWallet: ethers.Wallet;
 let dvpnContract: ethers.Contract;
 
+const bytesLikeToHex = (
+  value: unknown,
+  fieldName: string,
+  expectedBytesLength?: number,
+): string => {
+  if (typeof value === "string") {
+    if (!ethers.isHexString(value, expectedBytesLength)) {
+      throw new Error(`Invalid ${fieldName}`);
+    }
+    return value;
+  }
+
+  if (value instanceof Uint8Array || Array.isArray(value)) {
+    const hex = ethers.hexlify(value as Uint8Array | number[]);
+    if (!ethers.isHexString(hex, expectedBytesLength)) {
+      throw new Error(`Invalid ${fieldName}`);
+    }
+    return hex;
+  }
+
+  if (value && typeof value === "object") {
+    const indexedEntries = Object.entries(value as Record<string, unknown>)
+      .filter(([k]) => /^\d+$/.test(k))
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    if (indexedEntries.length > 0) {
+      const bytes = Uint8Array.from(indexedEntries.map(([, v]) => Number(v)));
+      const hex = ethers.hexlify(bytes);
+      if (!ethers.isHexString(hex, expectedBytesLength)) {
+        throw new Error(`Invalid ${fieldName}`);
+      }
+      return hex;
+    }
+  }
+
+  throw new Error(`Invalid ${fieldName}`);
+};
+
 const parseAndValidatePayload = (payload: EncryptedInputPayload | string): EncryptedInputPayload => {
   const raw = typeof payload === "string" ? JSON.parse(payload) : payload;
   const typed = raw as Partial<EncryptedInputPayload>;
 
-  if (!typed.handle || !ethers.isHexString(typed.handle, 32)) {
-    throw new Error("Invalid encrypted payload handle");
-  }
-  if (!typed.inputProof || !ethers.isHexString(typed.inputProof)) {
-    throw new Error("Invalid encrypted payload proof");
-  }
+  const handle = bytesLikeToHex(typed.handle, "encrypted payload handle", 32);
+  const inputProof = bytesLikeToHex(typed.inputProof, "encrypted payload proof");
   if (!typed.importerAddress || !ethers.isAddress(typed.importerAddress)) {
     throw new Error("Invalid encrypted payload importerAddress");
   }
 
   return {
-    handle: typed.handle,
-    inputProof: typed.inputProof,
+    handle,
+    inputProof,
     importerAddress: typed.importerAddress,
     source: typed.source ?? "relayer-sdk",
   };

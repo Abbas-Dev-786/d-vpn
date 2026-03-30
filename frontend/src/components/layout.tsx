@@ -9,6 +9,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth()
   const [location] = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
+  const walletLabel = user?.evmAddress || user?.userAddress || ""
+  const shortWalletLabel =
+    walletLabel.length > 10
+      ? `${walletLabel.slice(0, 6)}...${walletLabel.slice(-4)}`
+      : walletLabel || "unknown"
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: Shield },
@@ -57,9 +62,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="hidden md:flex items-center gap-4">
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-xs font-mono border border-primary/20">
                     <Wallet className="w-3 h-3 text-primary" />
-                    <span className="text-primary/90">
-                      {user.evmAddress.substring(0, 6)}...{user.evmAddress.substring(user.evmAddress.length - 4)}
-                    </span>
+                    <span className="text-primary/90">{shortWalletLabel}</span>
                   </div>
                   <Button variant="ghost" size="icon" onClick={() => logout()} title="Disconnect Account">
                     <LogOut className="w-4 h-4" />
@@ -104,7 +107,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="pt-4 border-t border-border flex items-center justify-between">
              <div className="flex items-center gap-2 text-xs font-mono text-primary/80">
               <Wallet className="w-4 h-4" />
-              {user.evmAddress}
+              {walletLabel || "unknown"}
             </div>
             <Button variant="ghost" size="sm" onClick={() => { logout(); setMobileMenuOpen(false); }}>
               Disconnect

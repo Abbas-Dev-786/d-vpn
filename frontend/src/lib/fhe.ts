@@ -1,4 +1,4 @@
-import { SepoliaConfig, createInstance } from "@zama-fhe/relayer-sdk/web";
+import { SepoliaConfigV2, createInstance, initSDK } from "@zama-fhe/relayer-sdk/web";
 import { ethers } from "ethers";
 
 export type EncryptedInputPayload = {
@@ -9,6 +9,18 @@ export type EncryptedInputPayload = {
 };
 
 let instancePromise: Promise<any> | null = null;
+let sdkInitPromise: Promise<unknown> | null = null;
+const FALLBACK_RPC_URLS = [
+  import.meta.env.VITE_ZAMA_RPC_URL,
+  "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://sepolia.drpc.org",
+].filter((v): v is string => !!v);
+
+const normalizeRelayerUrl = (url?: string): string => {
+  const base = (url ?? SepoliaConfigV2.relayerUrl).replace(/\/$/, "");
+  if (base.endsWith("/v1") || base.endsWith("/v2")) return base;
+  return `${base}/v2`;
+};
 
 const normalizeAddress = (value: string, fallback: string): string => {
   if (ethers.isAddress(value)) return ethers.getAddress(value);
@@ -29,10 +41,37 @@ export const getImporterAddress = (): string =>
 
 export const getFhevmInstance = async () => {
   if (!instancePromise) {
-    instancePromise = createInstance({
-      ...SepoliaConfig,
-      network:
-        import.meta.env.VITE_ZAMA_RPC_URL ?? "https://eth-sepolia.public.blastapi.io",
+    instancePromise = (async () => {
+      let lastError: unknown = null;
+
+      if (!sdkInitPromise) {
+        sdkInitPromise = initSDK({ thread: 1 }).catch((err) => {
+          sdkInitPromise = null;
+          throw err;
+        });
+      }
+      await sdkInitPromise;
+
+      const relayerUrl = normalizeRelayerUrl(
+        import.meta.env.VITE_ZAMA_RELAYER_URL,
+      );
+
+      for (const rpc of FALLBACK_RPC_URLS) {
+        try {
+          return await createInstance({
+            ...SepoliaConfigV2,
+            network: rpc,
+            relayerUrl,
+          });
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      throw lastError ?? new Error("Unable to initialize Zama relayer SDK");
+    })().catch((err) => {
+      instancePromise = null;
+      throw err;
     });
   }
   return instancePromise;
@@ -43,17 +82,27 @@ export const encryptSessionTime = async (
   importerAddress: string,
   value: number | bigint,
 ): Promise<EncryptedInputPayload> => {
-  const instance = await getFhevmInstance();
-  const input = instance.createEncryptedInput(contractAddress, importerAddress);
-  input.add64(BigInt(value));
-  const encrypted = await input.encrypt();
+  try {
+    const instance = await getFhevmInstance();
+    const input = instance.createEncryptedInput(contractAddress, importerAddress);
+    input.add64(BigInt(value));
+    const encrypted = await input.encrypt();
+    const handleHex = ethers.hexlify(encrypted.handles[0]);
+    const proofHex = ethers.hexlify(encrypted.inputProof);
 
-  return {
-    handle: encrypted.handles[0],
-    inputProof: encrypted.inputProof,
-    importerAddress,
-    source: "relayer-sdk",
-  };
+    return {
+      handle: handleHex,
+      inputProof: proofHex,
+      importerAddress,
+      source: "relayer-sdk",
+    };
+  } catch (err: any) {
+    const message =
+      typeof err?.message === "string"
+        ? err.message
+        : "Failed to initialize relayer SDK or encrypt payload";
+    throw new Error(message);
+  }
 };
 
 export function truncateFhe(hash: string | null | undefined): string {
