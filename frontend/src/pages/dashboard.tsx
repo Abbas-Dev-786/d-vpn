@@ -15,7 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { encryptSessionTime, getDvpnContractAddress, getImporterAddress } from "@/lib/fhe"
 import { format } from "date-fns"
-import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin, ChevronDown, Check } from "lucide-react"
+import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin, ChevronDown, Check, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -249,9 +249,8 @@ export default function Dashboard() {
                               setSelectedNodeId(node.nodeId)
                               setNodeDropdownOpen(false)
                             }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-primary/10 transition-colors ${
-                              selectedNodeId === node.nodeId ? 'bg-primary/5' : ''
-                            }`}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-primary/10 transition-colors ${selectedNodeId === node.nodeId ? 'bg-primary/5' : ''
+                              }`}
                           >
                             <span className={`w-2 h-2 rounded-full shrink-0 ${node.isActive ? 'bg-primary' : 'bg-muted-foreground'}`} />
                             <div className="min-w-0 flex-1">
@@ -359,9 +358,15 @@ export default function Dashboard() {
                       <td className="px-4 py-3">
                         {s.status === 'active' ? "-" : `${s.settlementAmount || "0"} ${s.settlementToken || "FLOW"}`}
                         {s.settlementTxHash && (
-                          <div className="text-[10px] text-muted-foreground font-mono mt-1">
+                          <a
+                            href={`https://testnet.flowscan.io/evm/tx/${s.settlementTxHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary font-mono mt-1 transition-colors"
+                          >
                             {s.settlementTxHash.substring(0, 12)}...
-                          </div>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
@@ -460,15 +465,13 @@ export default function Dashboard() {
                     toast({ title: "Node Selected", description: `Will connect via ${node.name} (${node.location})` })
                   }
                 }}
-                className={`text-sm transition-all ${
-                  !isConnected && node.isActive ? 'cursor-pointer hover:border-primary/40 hover:shadow-[0_0_8px_rgba(0,255,65,0.1)]' : ''
-                } ${
-                  selectedNodeId === node.nodeId
+                className={`text-sm transition-all ${!isConnected && node.isActive ? 'cursor-pointer hover:border-primary/40 hover:shadow-[0_0_8px_rgba(0,255,65,0.1)]' : ''
+                  } ${selectedNodeId === node.nodeId
                     ? 'border-primary/60 shadow-[0_0_10px_rgba(0,255,65,0.2)] ring-1 ring-primary/30'
                     : isConnected && activeNode?.nodeId === node.nodeId
                       ? 'border-primary/60 shadow-[0_0_10px_rgba(0,255,65,0.2)]'
                       : 'border-border/40'
-                } ${!node.isActive ? 'opacity-50' : ''}`}
+                  } ${!node.isActive ? 'opacity-50' : ''}`}
               >
                 <CardContent className="p-3 space-y-1">
                   <div className="flex items-center justify-between">
