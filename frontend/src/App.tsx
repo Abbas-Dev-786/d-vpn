@@ -3,7 +3,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/layout";
+import { setBaseUrl } from "@/api";
 import NotFound from "@/pages/not-found";
+
+// Initialize API base URL from environment
+const apiUrl = import.meta.env.VITE_API_URL;
+if (apiUrl) {
+  setBaseUrl(apiUrl);
+}
 
 // Pages
 import Login from "@/pages/login";
