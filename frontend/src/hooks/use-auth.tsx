@@ -43,25 +43,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           // 1. Sign a message to prove ownership (Hardening requirement)
           const msg = `flow-auth:${flowAddress}`;
-          const msgHex = Buffer.from(msg).toString("hex");
+          const msgHex = Array.from(new TextEncoder().encode(msg))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
           const signResponse = await fcl.currentUser.signUserMessage(msgHex);
           
           if (!signResponse || signResponse.length === 0) {
             throw new Error("User canceled signature or signature failed");
           }
           
-          // FCL signUserMessage returns an array of signatures (for multi-sig support)
-          // We take the first one; backend ether.verifyMessage expects a standard signature string.
-          const credential = signResponse[0].signature;
-
-          // 2. Call backend with the credential
+          // 2. Call backend with the signatures
           const response = await fetch("/api/auth/flow", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               method: "passkey",
               userAddress: flowAddress,
-              credential,
+              signatures: signResponse,
             }),
           });
           

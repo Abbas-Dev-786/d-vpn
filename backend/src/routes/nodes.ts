@@ -43,6 +43,9 @@ router.post(
     };
     const resolvedEvmAddress = evmAddress ?? address;
 
+    const isFlowNativeAddress = (addr: string) => /^0x[0-9a-fA-F]{16}$/.test(addr);
+    const isValidAddress = (addr: string) => ethers.isAddress(addr) || isFlowNativeAddress(addr);
+
     if (!resolvedEvmAddress || !flowAddress || !name || !location) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
@@ -50,17 +53,17 @@ router.post(
       });
       return;
     }
-    if (!ethers.isAddress(resolvedEvmAddress)) {
+    if (!isValidAddress(resolvedEvmAddress)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "evmAddress must be a valid EVM address",
+        message: "evmAddress must be a valid EVM address or Flow-native address",
       });
       return;
     }
-    if (!ethers.isAddress(flowAddress)) {
+    if (!isValidAddress(flowAddress)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "flowAddress must be a valid Flow EVM address",
+        message: "flowAddress must be a valid EVM address or Flow-native address",
       });
       return;
     }
@@ -72,8 +75,12 @@ router.post(
         .insert(nodesTable)
         .values({
           nodeId,
-          address: ethers.getAddress(resolvedEvmAddress),
-          flowAddress: ethers.getAddress(flowAddress),
+          address: ethers.isAddress(resolvedEvmAddress) 
+            ? ethers.getAddress(resolvedEvmAddress) 
+            : resolvedEvmAddress,
+          flowAddress: ethers.isAddress(flowAddress)
+            ? ethers.getAddress(flowAddress)
+            : flowAddress,
           name,
           location,
           isActive: true,
@@ -87,7 +94,9 @@ router.post(
         .insert(providerClaimsTable)
         .values({
           nodeId,
-          providerFlowAddress: ethers.getAddress(flowAddress),
+          providerFlowAddress: ethers.isAddress(flowAddress)
+            ? ethers.getAddress(flowAddress)
+            : flowAddress,
           claimableAmount: "0",
           updatedAt: new Date(),
         })

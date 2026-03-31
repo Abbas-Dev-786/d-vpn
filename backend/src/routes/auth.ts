@@ -1,18 +1,27 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { ethers } from "ethers";
+import * as fcl from "@onflow/fcl";
 import { eq } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { userWalletsTable, authSessionsTable } from "../schema/index.js";
 import { createCustodialWallet } from "../lib/custodial-keys.js";
 import { asyncHandler } from "../lib/async-handler.js";
 
+// Configure FCL for backend verification
+fcl.config({
+  "flow.network": "testnet",
+  "accessNode.api": "https://rest-testnet.onflow.org",
+});
+
 const router: IRouter = Router();
 
 router.post("/auth/flow", asyncHandler(async (req, res) => {
-  const { method, credential, userAddress, userEvmAddress } = req.body as {
+  console.log("Auth Flow Request Body:", JSON.stringify(req.body, null, 2));
+  
+  const { method, signatures, userAddress, userEvmAddress } = req.body as {
     method: string;
-    credential?: string;
+    signatures?: Array<{ addr: string; signature: string; keyId: number }>;
     userAddress?: string;
     userEvmAddress?: string;
   };
@@ -24,7 +33,7 @@ router.post("/auth/flow", asyncHandler(async (req, res) => {
 
   const validMethods = ["passkey", "google", "apple", "email"];
   if (!validMethods.includes(method)) {
-    res.status(400).json({ error: "BAD_REQUEST", message: "invalid method" });
+    res.status(400).json({ error: "BAD_REQUEST", message: `invalid method: ${method}` });
     return;
   }
 
@@ -33,8 +42,8 @@ router.post("/auth/flow", asyncHandler(async (req, res) => {
     return;
   }
 
-  if (!credential) {
-    res.status(400).json({ error: "BAD_REQUEST", message: "credential (signature) is required" });
+  if (!signatures || signatures.length === 0) {
+    res.status(400).json({ error: "BAD_REQUEST", message: "signatures array is required and cannot be empty" });
     return;
   }
 
@@ -60,20 +69,29 @@ router.post("/auth/flow", asyncHandler(async (req, res) => {
     custodialPrivateKeyCiphertext = custodial.privateKeyCiphertext;
   }
 
-  // Mandatory credential verification for ALL users
+  // 1. Sign a message to prove ownership (Hardening requirement)
+  // The frontend sends message hex encoded. FCL verifyUserSignatures expects it too.
   try {
-    const recovered = ethers.verifyMessage(`flow-auth:${flowAccountId}`, credential);
-    if (recovered.toLowerCase() !== resolvedUserEvmAddress.toLowerCase()) {
+    const msg = `flow-auth:${flowAccountId}`;
+    const msgHex = Buffer.from(msg).toString("hex");
+
+    const isVerified = await fcl.AppUtils.verifyUserSignatures(
+      msgHex,
+      signatures
+    );
+
+    if (!isVerified) {
       res.status(401).json({
         error: "UNAUTHORIZED",
-        message: "credential signature does not match target EVM address",
+        message: "Flow signature verification failed",
       });
       return;
     }
-  } catch (err) {
+  } catch (err: any) {
+    console.error("FCL Verification Error:", err);
     res.status(401).json({
       error: "UNAUTHORIZED",
-      message: "Failed to verify credential signature",
+      message: `Failed to verify Flow signature: ${err.message}`,
     });
     return;
   }

@@ -23,7 +23,11 @@ export const FlowAuthBody = zod.object({
   method: zod
     .enum(["passkey", "google", "apple", "email"])
     .describe("Authentication method"),
-  credential: zod.string().optional().describe("Auth credential or token"),
+  signatures: zod.array(zod.object({
+    addr: zod.string(),
+    signature: zod.string(),
+    keyId: zod.number(),
+  })).optional().describe("Flow authentication signatures"),
   userAddress: zod
     .string()
     .optional()

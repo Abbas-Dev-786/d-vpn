@@ -7,4 +7,5 @@ config({
   "accessNode.api": "https://rest-testnet.onflow.org",
   "discovery.wallet": "https://fcl-discovery.onflow.org/testnet/authn",
   "discovery.authn.endpoint": "https://fcl-discovery.onflow.org/api/testnet/authn",
+  "discovery.walletconnect.projectId": "a34164b380362f6b83f08969ed321e25",
 });
