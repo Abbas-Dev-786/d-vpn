@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:no-mocks": "if rg -n \"mock|simulate|0xMOCK|Math\\.random\" src/routes src/lib src/config; then echo 'Mock/simulated patterns found in runtime backend code'; exit 1; fi",
     "push": "drizzle-kit push --config ./drizzle.config.ts",
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
   },

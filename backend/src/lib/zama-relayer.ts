@@ -1,16 +1,9 @@
 import { ethers } from "ethers";
 import { logger } from "./logger";
 import DVPN from "./DVPN.json";
+import { getRuntimeConfig } from "../config/runtime";
 
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const MOCK_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001";
-const DEFAULT_RELAYER = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-// In production these should be injected from `.env`.
-const RPC_URL = process.env.ZAMA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
-const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || DEFAULT_RELAYER;
-const CONTRACT_ADDRESS = process.env.DVPN_CONTRACT_ADDRESS || MOCK_CONTRACT_ADDRESS;
-const MOCK_MODE = process.env.ZAMA_MOCK_MODE === "true" || CONTRACT_ADDRESS === MOCK_CONTRACT_ADDRESS;
+const runtime = getRuntimeConfig();
 
 export type EncryptedInputPayload = {
   handle: string;
@@ -83,12 +76,16 @@ export const initRelayer = () => {
   if (provider) return;
 
   try {
-    provider = new ethers.JsonRpcProvider(RPC_URL);
-    relayerWallet = new ethers.Wallet(RELAYER_PRIVATE_KEY, provider);
-    dvpnContract = new ethers.Contract(CONTRACT_ADDRESS, DVPN.abi, relayerWallet);
-    logger.info({ address: relayerWallet.address, contractAddress: CONTRACT_ADDRESS, mock: MOCK_MODE }, "Zama Trusted Relayer Initialized");
+    provider = new ethers.JsonRpcProvider(runtime.zamaRpcUrl);
+    relayerWallet = new ethers.Wallet(runtime.zamaRelayerPrivateKey, provider);
+    dvpnContract = new ethers.Contract(runtime.dvpnContractAddress, DVPN.abi, relayerWallet);
+    logger.info(
+      { address: relayerWallet.address, contractAddress: runtime.dvpnContractAddress },
+      "Zama Trusted Relayer Initialized",
+    );
   } catch (err) {
     logger.error({ err }, "Failed to initialize Zama Trusted Relayer");
+    throw err;
   }
 };
 
@@ -113,11 +110,6 @@ export const startSessionOnChain = async (
     }
 
     logger.info({ userEvmAddress, nodeProviderEvmAddress, importerAddress: payload.importerAddress }, "Relaying startSession to Zama fhEVM...");
-
-    if (MOCK_MODE) {
-      logger.info("Mock Contract interaction. Simulating transaction success.");
-      return "0xMOCK_TX_HASH_START";
-    }
 
     const tx = await dvpnContract.startSession(userEvmAddress, nodeProviderEvmAddress, payload.handle, payload.inputProof);
     await tx.wait();
@@ -150,11 +142,6 @@ export const endSessionOnChain = async (
 
     logger.info({ userEvmAddress, importerAddress: payload.importerAddress }, "Relaying endConfidentialSession to Zama fhEVM...");
 
-    if (MOCK_MODE) {
-      logger.info("Mock Contract interaction. Simulating transaction success.");
-      return "0xMOCK_TX_HASH_END";
-    }
-
     const tx = await dvpnContract.endConfidentialSession(userEvmAddress, payload.handle, payload.inputProof);
     await tx.wait();
 
@@ -170,7 +157,4 @@ export const getTrustedRelayerAddress = (): string => {
   return relayerWallet.address;
 };
 
-export const getConfiguredContractAddress = (): string => CONTRACT_ADDRESS;
-export const isMockMode = (): boolean => MOCK_MODE;
-export const getDefaultRelayerAddress = (): string => new ethers.Wallet(DEFAULT_RELAYER).address;
-export const getZeroAddress = (): string => ZERO_ADDRESS;
+export const getConfiguredContractAddress = (): string => runtime.dvpnContractAddress;

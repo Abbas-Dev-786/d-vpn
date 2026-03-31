@@ -28,6 +28,10 @@ export const FlowAuthBody = zod.object({
     .string()
     .optional()
     .describe("Optional existing Flow account address"),
+  userEvmAddress: zod
+    .string()
+    .optional()
+    .describe("Optional existing EVM address"),
 });
 
 export const FlowAuthResponse = zod.object({
@@ -203,11 +207,14 @@ export const WithdrawNodeEarningsBody = zod.object({
     .describe(
       "The wallet address of the caller. Must match the node's registered owner address.",
     ),
+  idempotencyKey: zod
+    .string()
+    .describe("Client-generated idempotency key to make retries safe"),
 });
 
 export const WithdrawNodeEarningsResponse = zod.object({
   nodeId: zod.string(),
-  txHash: zod.string().describe("Simulated blockchain transaction hash"),
+  txHash: zod.string().describe("Flow transaction hash"),
   amount: zod.string().describe("Decrypted withdrawal amount in FLOW tokens"),
   status: zod.enum(["pending", "confirmed"]),
 });
@@ -240,14 +247,21 @@ export const ListPaymentSchedulesResponse = zod.object({
     zod.object({
       scheduleId: zod.string(),
       userAddress: zod.string(),
+      custodialWalletAddress: zod.string().nullish(),
       budgetAmount: zod.number(),
       currency: zod.string(),
       frequency: zod.enum(["monthly", "weekly"]),
       flowAutopilotId: zod
         .string()
         .optional()
-        .describe("Flow blockchain Autopilot schedule ID"),
+        .describe("Native Flow schedule/cron job ID"),
+      scheduleTxHash: zod.string().nullish(),
+      cadence: zod.string().nullish(),
       nextDueAt: zod.coerce.date(),
+      lastRunAt: zod.coerce.date().nullish(),
+      lastRunTxHash: zod.string().nullish(),
+      lastRunStatus: zod.string().nullish(),
+      failureReason: zod.string().nullish(),
       isActive: zod.boolean(),
       createdAt: zod.coerce.date(),
     }),

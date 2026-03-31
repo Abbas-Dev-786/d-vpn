@@ -14,8 +14,8 @@ import "./tasks/FHECounter";
 
 // Run 'npx hardhat vars setup' to see the list of variables that need to be set
 
-const MNEMONIC: string = vars.get("MNEMONIC", "test test test test test test test test test test test junk");
-const INFURA_API_KEY: string = vars.get("INFURA_API_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
+const MNEMONIC: string = vars.get("MNEMONIC");
+const INFURA_API_KEY: string = vars.get("INFURA_API_KEY");
 
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",

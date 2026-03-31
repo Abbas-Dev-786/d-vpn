@@ -9,4 +9,6 @@
 export interface WithdrawNodeEarningsBody {
   /** The caller's EVM address. Must match the node's registered EVM owner address. */
   callerEvmAddress: string;
+  /** Client-generated idempotency key for safe retries */
+  idempotencyKey: string;
 }

@@ -1,5 +1,5 @@
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ethers, fhevm, deployments } from "hardhat";
+import { ethers, fhevm, deployments, network } from "hardhat";
 import { FHECounter } from "../types";
 import { expect } from "chai";
 import { FhevmType } from "@fhevm/hardhat-plugin";
@@ -20,8 +20,7 @@ describe("FHECounterSepolia", function () {
   }
 
   before(async function () {
-    if (fhevm.isMock) {
-      console.warn(`This hardhat test suite can only run on Sepolia Testnet`);
+    if (network.name !== "sepolia") {
       this.skip();
     }
 

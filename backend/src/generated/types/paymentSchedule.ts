@@ -10,12 +10,19 @@ import type { PaymentScheduleFrequency } from "./paymentScheduleFrequency";
 export interface PaymentSchedule {
   scheduleId: string;
   userAddress: string;
+  custodialWalletAddress?: string;
   budgetAmount: number;
   currency: string;
   frequency: PaymentScheduleFrequency;
-  /** Flow blockchain Autopilot schedule ID */
+  /** Native Flow schedule/cron job ID */
   flowAutopilotId?: string;
+  scheduleTxHash?: string;
+  cadence?: string;
   nextDueAt: Date;
+  lastRunAt?: Date;
+  lastRunTxHash?: string;
+  lastRunStatus?: string;
+  failureReason?: string;
   isActive: boolean;
   createdAt: Date;
 }

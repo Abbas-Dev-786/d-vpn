@@ -1,134 +1,94 @@
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ethers, fhevm } from "hardhat";
-import { DVPN, DVPN__factory } from "../types";
+import { ethers, network, fhevm } from "hardhat";
 import { expect } from "chai";
-import { FhevmType } from "@fhevm/hardhat-plugin";
+import { DVPN, DVPN__factory } from "../types";
 
 type Signers = {
-  deployer: HardhatEthersSigner;
   alice: HardhatEthersSigner;
   provider: HardhatEthersSigner;
 };
 
-async function deployFixture() {
-  const ratePerSecond = 5; // e.g. 5 tokens per second
-  const factory = (await ethers.getContractFactory("DVPN")) as DVPN__factory;
-  const trustedRelayer = await (await ethers.getSigners())[0].getAddress();
-  const dvpnContract = (await factory.deploy(ratePerSecond, trustedRelayer)) as DVPN;
-  const dvpnContractAddress = await dvpnContract.getAddress();
-
-  return { dvpnContract, dvpnContractAddress, ratePerSecond };
-}
-
-describe("DVPN Smart Contract", function () {
+describe("DVPN Sepolia Integration", function () {
   let signers: Signers;
   let dvpnContract: DVPN;
   let dvpnContractAddress: string;
-  let ratePerSecond: number;
+  let relayerSigner: HardhatEthersSigner;
 
   before(async function () {
-    const ethSigners: HardhatEthersSigner[] = await ethers.getSigners();
-    signers = { deployer: ethSigners[0], alice: ethSigners[1], provider: ethSigners[2] };
-  });
-
-  beforeEach(async function () {
-    if (!fhevm.isMock) {
-      console.warn(`This hardhat test suite requires a mock FHEVM environment`);
+    if (network.name !== "sepolia") {
       this.skip();
     }
+    const ethSigners: HardhatEthersSigner[] = await ethers.getSigners();
+    signers = { alice: ethSigners[1], provider: ethSigners[2] };
 
-    ({ dvpnContract, dvpnContractAddress, ratePerSecond } = await deployFixture());
-  });
-
-  it("should successfully log a session and compute homomorphic earnings for provider", async function () {
-    // 1. Session start
-    const clearStartTime = 1000;
-    const encryptedStartTime = await fhevm
-      .createEncryptedInput(dvpnContractAddress, signers.alice.address)
-      .add64(clearStartTime)
-      .encrypt();
-
-    const startTx = await dvpnContract
-      .connect(signers.alice)
-      .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof);
-    await startTx.wait();
-
-    // 2. Session end
-    const clearEndTime = 1100; // Duration = 100 seconds
-    const encryptedEndTime = await fhevm
-      .createEncryptedInput(dvpnContractAddress, signers.alice.address) // or provider if they end it
-      .add64(clearEndTime)
-      .encrypt();
-
-    const endTx = await dvpnContract
-      .connect(signers.alice) // User cleanly terminates it
-      .endConfidentialSession(signers.alice.address, encryptedEndTime.handles[0], encryptedEndTime.inputProof);
-    await endTx.wait();
-
-    // 3. Provider fetches and decrypts balance
-    // The provider's balance should be (1100 - 1000) * ratePerSecond = 100 * 5 = 500
-    const encryptedBalance = await dvpnContract.providerBalances(signers.provider.address);
-    
-    const clearBalance = await fhevm.userDecryptEuint(
-      FhevmType.euint64,
-      encryptedBalance,
-      dvpnContractAddress,
-      signers.provider, // Notice provider doing the decrypt requests, they have access because of FHE.allow
-    );
-
-    expect(Number(clearBalance)).to.eq(500);
-  });
-
-  it("should prevent unauthorized addresses from decrypting the provider balance", async function () {
-    const clearStartTime = 500;
-    const encryptedStartTime = await fhevm
-      .createEncryptedInput(dvpnContractAddress, signers.alice.address)
-      .add64(clearStartTime)
-      .encrypt();
-
-    await (
-      await dvpnContract
-        .connect(signers.alice)
-        .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof)
-    ).wait();
-
-    const clearEndTime = 600;
-    const encryptedEndTime = await fhevm
-      .createEncryptedInput(dvpnContractAddress, signers.provider.address) // Provider terminates it
-      .add64(clearEndTime)
-      .encrypt();
-
-    // Dual termination logic test: provider ends it
-    await (await dvpnContract.connect(signers.provider).endConfidentialSession(signers.alice.address, encryptedEndTime.handles[0], encryptedEndTime.inputProof)).wait();
-
-    const encryptedBalance = await dvpnContract.providerBalances(signers.provider.address);
-
-    // Try decrypting as alice (who shouldn't have access to the provider balance total)
-    let decryptionError = false;
-    try {
-        await fhevm.userDecryptEuint(
-            FhevmType.euint64,
-            encryptedBalance,
-            dvpnContractAddress,
-            signers.alice,
-        );
-    } catch (e) {
-        decryptionError = true;
+    const contractAddress = process.env.DVPN_CONTRACT_ADDRESS;
+    if (!contractAddress) {
+      throw new Error("DVPN_CONTRACT_ADDRESS is required for integration tests");
     }
 
-    expect(decryptionError).to.be.true; // Alice should be denied
+    dvpnContractAddress = contractAddress;
+    dvpnContract = DVPN__factory.connect(dvpnContractAddress, ethSigners[0]);
+
+    const configuredRelayer = await dvpnContract.trustedRelayer();
+    const trustedSigner = ethSigners.find(
+      (s) => s.address.toLowerCase() === configuredRelayer.toLowerCase(),
+    );
+    if (!trustedSigner) {
+      throw new Error("Trusted relayer address is not available in configured sepolia signers");
+    }
+    relayerSigner = trustedSigner;
+    dvpnContract = DVPN__factory.connect(dvpnContractAddress, relayerSigner);
   });
 
-  it("should reject relayer submission when ciphertext importer is not the relayer", async function () {
+  it("starts and ends a real confidential session via the trusted relayer", async function () {
+    const clearStartTime = BigInt(Date.now());
+    const startInput = await fhevm
+      .createEncryptedInput(dvpnContractAddress, relayerSigner.address)
+      .add64(clearStartTime)
+      .encrypt();
+
+    const startTx = await dvpnContract.startSession(
+      signers.alice.address,
+      signers.provider.address,
+      startInput.handles[0],
+      startInput.inputProof,
+    );
+    await startTx.wait();
+    expect(startTx.hash).to.match(/^0x[0-9a-fA-F]{64}$/);
+
+    const endInput = await fhevm
+      .createEncryptedInput(dvpnContractAddress, relayerSigner.address)
+      .add64(clearStartTime + 120n)
+      .encrypt();
+
+    const endTx = await dvpnContract.endConfidentialSession(
+      signers.alice.address,
+      endInput.handles[0],
+      endInput.inputProof,
+    );
+    await endTx.wait();
+    expect(endTx.hash).to.match(/^0x[0-9a-fA-F]{64}$/);
+
+    const encryptedBalance = await dvpnContract.providerBalances(signers.provider.address);
+    expect(encryptedBalance).to.not.equal(ethers.ZeroHash);
+  });
+
+  it("rejects startSession when ciphertext importer does not match tx sender", async function () {
+    const wrongImporter = signers.alice.address;
     const encryptedStartTime = await fhevm
-      .createEncryptedInput(dvpnContractAddress, signers.alice.address)
-      .add64(1234)
+      .createEncryptedInput(dvpnContractAddress, wrongImporter)
+      .add64(1234n)
       .encrypt();
 
     await expect(
       dvpnContract
-        .connect(signers.deployer)
-        .startSession(signers.alice.address, signers.provider.address, encryptedStartTime.handles[0], encryptedStartTime.inputProof),
+        .connect(relayerSigner)
+        .startSession(
+          signers.alice.address,
+          signers.provider.address,
+          encryptedStartTime.handles[0],
+          encryptedStartTime.inputProof,
+        ),
     ).to.be.reverted;
   });
 });

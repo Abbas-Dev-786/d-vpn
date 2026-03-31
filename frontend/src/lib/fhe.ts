@@ -16,28 +16,30 @@ const FALLBACK_RPC_URLS = [
   "https://sepolia.drpc.org",
 ].filter((v): v is string => !!v);
 
+const requiredEnv = (name: string): string => {
+  const value = import.meta.env[name];
+  if (!value || typeof value !== "string" || !value.trim()) {
+    throw new Error(`Missing required frontend env: ${name}`);
+  }
+  return value.trim();
+};
+
 const normalizeRelayerUrl = (url?: string): string => {
   const base = (url ?? SepoliaConfigV2.relayerUrl).replace(/\/$/, "");
   if (base.endsWith("/v1") || base.endsWith("/v2")) return base;
   return `${base}/v2`;
 };
 
-const normalizeAddress = (value: string, fallback: string): string => {
+const normalizeAddress = (value: string): string => {
   if (ethers.isAddress(value)) return ethers.getAddress(value);
-  return ethers.getAddress(fallback);
+  throw new Error("Invalid address in frontend env configuration");
 };
 
 export const getDvpnContractAddress = (): string =>
-  normalizeAddress(
-    import.meta.env.VITE_DVPN_CONTRACT_ADDRESS ?? "",
-    "0x0000000000000000000000000000000000000001",
-  );
+  normalizeAddress(requiredEnv("VITE_DVPN_CONTRACT_ADDRESS"));
 
 export const getImporterAddress = (): string =>
-  normalizeAddress(
-    import.meta.env.VITE_ZAMA_IMPORTER_ADDRESS ?? "",
-    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-  );
+  normalizeAddress(requiredEnv("VITE_ZAMA_IMPORTER_ADDRESS"));
 
 export const getFhevmInstance = async () => {
   if (!instancePromise) {
@@ -53,7 +55,7 @@ export const getFhevmInstance = async () => {
       await sdkInitPromise;
 
       const relayerUrl = normalizeRelayerUrl(
-        import.meta.env.VITE_ZAMA_RELAYER_URL,
+        requiredEnv("VITE_ZAMA_RELAYER_URL"),
       );
 
       for (const rpc of FALLBACK_RPC_URLS) {

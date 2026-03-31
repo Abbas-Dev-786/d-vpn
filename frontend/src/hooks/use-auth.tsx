@@ -25,6 +25,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = fcl.currentUser.subscribe(async (currentUser: any) => {
       if (currentUser?.loggedIn) {
         const flowAddress = currentUser?.addr ?? "";
+        if (!flowAddress) {
+          setUser(null);
+          return;
+        }
 
         try {
           const response = await fetch("/api/auth/flow", {
@@ -35,21 +39,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               userAddress: flowAddress,
             }),
           });
-          const auth = response.ok ? await response.json() : {};
+          if (!response.ok) {
+            throw new Error(`Flow auth failed with status ${response.status}`);
+          }
+          const auth = await response.json();
 
           setUser({
-            userAddress: auth.userAddress ?? flowAddress,
-            evmAddress: auth.userEvmAddress ?? flowAddress,
-            displayName: auth.displayName ?? flowAddress,
-            sessionToken: auth.sessionToken ?? "flow_session",
+            userAddress: auth.userAddress,
+            evmAddress: auth.userEvmAddress,
+            displayName: auth.displayName ?? auth.userAddress,
+            sessionToken: auth.sessionToken,
           });
         } catch {
-          setUser({
-            userAddress: flowAddress,
-            evmAddress: flowAddress,
-            displayName: flowAddress,
-            sessionToken: "flow_session",
-          });
+          setUser(null);
         }
       } else {
         setUser(null)

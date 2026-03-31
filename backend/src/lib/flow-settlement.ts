@@ -1,19 +1,10 @@
-import { createHash } from "crypto";
 import { ethers } from "ethers";
 import { logger } from "./logger";
+import { getRuntimeConfig } from "../config/runtime";
 
-const DEFAULT_FLOW_RPC_URL = "https://testnet.evm.nodes.onflow.org";
-const DEFAULT_FLOW_CHAIN_ID = 545;
-const MOCK_SETTLEMENT_HASH_PREFIX = "0x";
-
-const FLOW_EVM_RPC_URL = process.env.FLOW_EVM_RPC_URL || DEFAULT_FLOW_RPC_URL;
-const FLOW_EVM_CHAIN_ID = Number(process.env.FLOW_EVM_CHAIN_ID || DEFAULT_FLOW_CHAIN_ID);
-const FLOW_SETTLER_PRIVATE_KEY = process.env.FLOW_SETTLER_PRIVATE_KEY;
+const runtime = getRuntimeConfig();
 const FLOW_RATE_PER_SECOND = process.env.FLOW_RATE_PER_SECOND || "0.00001";
 const FLOW_MAX_PAYOUT_PER_SESSION = process.env.FLOW_MAX_PAYOUT_PER_SESSION || "0.05";
-const FLOW_MOCK_MODE =
-  process.env.FLOW_MOCK_MODE === "true" ||
-  !FLOW_SETTLER_PRIVATE_KEY;
 
 export type SettlementStatus = "submitted" | "failed";
 
@@ -30,29 +21,26 @@ export type FlowSettlementResult = {
 let flowProvider: ethers.Provider | null = null;
 let flowSettlerWallet: ethers.Wallet | null = null;
 
-const buildMockTxHash = (sessionId: string): string => {
-  const digest = createHash("sha256").update(`flow-settlement:${sessionId}`).digest("hex");
-  return `${MOCK_SETTLEMENT_HASH_PREFIX}${digest}`;
-};
-
 const normalizeReason = (reason: string): string =>
   reason.length > 250 ? `${reason.slice(0, 247)}...` : reason;
 
 const initFlowSettler = (): void => {
-  if (flowProvider || FLOW_MOCK_MODE) return;
+  if (flowProvider) return;
 
-  flowProvider = new ethers.JsonRpcProvider(FLOW_EVM_RPC_URL, {
-    chainId: FLOW_EVM_CHAIN_ID,
+  flowProvider = new ethers.JsonRpcProvider(runtime.flowEvmRpcUrl, {
+    chainId: runtime.flowEvmChainId,
     name: "flow-evm",
   });
-  flowSettlerWallet = new ethers.Wallet(FLOW_SETTLER_PRIVATE_KEY as string, flowProvider);
+  flowSettlerWallet = new ethers.Wallet(runtime.flowSettlerPrivateKey, flowProvider);
+  if (flowSettlerWallet.address.toLowerCase() !== runtime.flowTreasuryAddress.toLowerCase()) {
+    throw new Error("FLOW_SETTLER_PRIVATE_KEY does not match FLOW_TREASURY_ADDRESS");
+  }
 
   logger.info(
     {
       address: flowSettlerWallet.address,
-      rpcUrl: FLOW_EVM_RPC_URL,
-      chainId: FLOW_EVM_CHAIN_ID,
-      mockMode: FLOW_MOCK_MODE,
+      rpcUrl: runtime.flowEvmRpcUrl,
+      chainId: runtime.flowEvmChainId,
     },
     "Flow settlement relayer initialized",
   );
@@ -106,22 +94,6 @@ export const settleFlowForSession = async (args: {
     };
   }
 
-  if (FLOW_MOCK_MODE) {
-    logger.info(
-      { sessionId, providerFlowAddress, amountFlow },
-      "FLOW settlement running in mock mode",
-    );
-    return {
-      settlementStatus: "submitted",
-      settlementTxHash: buildMockTxHash(sessionId),
-      settlementFailureReason: null,
-      settlementAmountFlow: amountFlow,
-      settlementToken: "FLOW",
-      settlementAttemptCount: 1,
-      settledAt: new Date(),
-    };
-  }
-
   initFlowSettler();
   if (!flowSettlerWallet) {
     return {
@@ -166,5 +138,40 @@ export const settleFlowForSession = async (args: {
       settlementAttemptCount: 1,
       settledAt: null,
     };
+  }
+};
+
+export const transferFlowFromTreasury = async (args: {
+  recipientAddress: string;
+  amountFlow: string;
+  context: string;
+}): Promise<{ txHash: string }> => {
+  const { recipientAddress, amountFlow, context } = args;
+  if (!ethers.isAddress(recipientAddress)) {
+    throw new Error("Invalid recipientAddress");
+  }
+  const wei = ethers.parseUnits(amountFlow, 18);
+  if (wei <= 0n) {
+    throw new Error("amountFlow must be greater than zero");
+  }
+
+  initFlowSettler();
+  if (!flowSettlerWallet) {
+    throw new Error("Flow settlement wallet is not configured");
+  }
+
+  try {
+    const tx = await flowSettlerWallet.sendTransaction({
+      to: ethers.getAddress(recipientAddress),
+      value: wei,
+    });
+    await tx.wait();
+
+    logger.info({ context, recipientAddress, amountFlow, txHash: tx.hash }, "Flow transfer confirmed");
+    return { txHash: tx.hash };
+  } catch (err: any) {
+    const reason = normalizeReason(err?.message ?? "Unknown Flow transfer failure");
+    logger.error({ err, context, recipientAddress, amountFlow }, "Flow transfer failed");
+    throw new Error(reason);
   }
 };

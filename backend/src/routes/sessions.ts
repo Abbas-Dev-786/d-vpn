@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "../config/db";
-import { sessionsTable, nodesTable } from "../schema";
+import { sessionsTable, nodesTable, providerClaimsTable, userWalletsTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
 import { settleFlowForSession } from "../lib/flow-settlement";
+import { startSessionOnChain, endSessionOnChain } from "../lib/zama-relayer";
 
 const router: IRouter = Router();
 const HASH_PREFIX = "0x";
@@ -91,14 +92,14 @@ router.post(
     };
     const normalizedFlowAddress = flowUserAddress ?? userAddress;
 
-    if (!normalizedFlowAddress || !nodeId || !encryptedStartTime) {
+    if (!normalizedFlowAddress || !nodeId || !encryptedStartTime || !userEvmAddress) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "flowUserAddress (or userAddress), nodeId, and encryptedStartTime are required",
+        message: "flowUserAddress (or userAddress), userEvmAddress, nodeId, and encryptedStartTime are required",
       });
       return;
     }
-    if (userEvmAddress && !ethers.isAddress(userEvmAddress)) {
+    if (!ethers.isAddress(userEvmAddress)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
         message: "userEvmAddress must be a valid EVM address",
@@ -108,6 +109,25 @@ router.post(
 
     try {
       const normalizedPayload = normalizeEncryptedPayload(encryptedStartTime);
+      const [mappedWallet] = await db
+        .select()
+        .from(userWalletsTable)
+        .where(eq(userWalletsTable.flowAddress, normalizedFlowAddress))
+        .limit(1);
+      if (!mappedWallet) {
+        res.status(404).json({
+          error: "NOT_FOUND",
+          message: "No wallet mapping found for flowUserAddress",
+        });
+        return;
+      }
+      if (mappedWallet.userEvmAddress.toLowerCase() !== userEvmAddress.toLowerCase()) {
+        res.status(403).json({
+          error: "FORBIDDEN",
+          message: "Provided userEvmAddress does not match mapped identity",
+        });
+        return;
+      }
 
       // Check if node exists and is active
       const node = await db
@@ -120,6 +140,14 @@ router.post(
         res
           .status(404)
           .json({ error: "NOT_FOUND", message: "Active node not found" });
+        return;
+      }
+
+      if (!node[0].address || !ethers.isAddress(node[0].address)) {
+        res.status(400).json({
+          error: "INVALID_NODE_CONFIG",
+          message: "Selected node does not have a valid provider EVM address",
+        });
         return;
       }
 
@@ -144,17 +172,23 @@ router.post(
 
       const sessionId = `sess_${randomUUID()}`;
       const now = new Date();
+      const startTxHash = await startSessionOnChain(
+        ethers.getAddress(userEvmAddress),
+        ethers.getAddress(node[0].address),
+        normalizedPayload,
+      );
 
       const [session] = await db
         .insert(sessionsTable)
         .values({
           sessionId,
           userAddress: normalizedFlowAddress,
-          userEvmAddress: userEvmAddress ? ethers.getAddress(userEvmAddress) : null,
+          userEvmAddress: ethers.getAddress(userEvmAddress),
           providerFlowAddress,
           nodeId,
           status: "active",
           encryptedStartTime: normalizedPayload.handle,
+          startTxHash,
           startImporterAddress: normalizedPayload.importerAddress,
           startInputProofHash: hashProof(normalizedPayload.inputProof),
           createdAt: now,
@@ -229,6 +263,13 @@ router.post(
         1,
         Math.ceil((now.getTime() - existing[0].createdAt.getTime()) / 1000),
       );
+      if (!existing[0].userEvmAddress || !ethers.isAddress(existing[0].userEvmAddress)) {
+        res.status(500).json({
+          error: "INVALID_SESSION_CONFIG",
+          message: "Session is missing a valid userEvmAddress",
+        });
+        return;
+      }
 
       let providerFlowAddress = existing[0].providerFlowAddress ?? null;
       if (!providerFlowAddress || !ethers.isAddress(providerFlowAddress)) {
@@ -256,6 +297,10 @@ router.post(
         return;
       }
 
+      const endTxHash = await endSessionOnChain(
+        ethers.getAddress(existing[0].userEvmAddress),
+        normalizedPayload,
+      );
       const settlement = await settleFlowForSession({
         sessionId,
         providerFlowAddress: ethers.getAddress(providerFlowAddress),
@@ -263,13 +308,32 @@ router.post(
       });
       const nextStatus = settlement.settlementStatus === "submitted" ? "settled" : "ended";
 
+      if (settlement.settlementStatus !== "submitted") {
+        await db
+          .insert(providerClaimsTable)
+          .values({
+            nodeId: existing[0].nodeId,
+            providerFlowAddress: ethers.getAddress(providerFlowAddress),
+            claimableAmount: settlement.settlementAmountFlow,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: providerClaimsTable.nodeId,
+            set: {
+              providerFlowAddress: ethers.getAddress(providerFlowAddress),
+              claimableAmount: sql`${providerClaimsTable.claimableAmount} + ${settlement.settlementAmountFlow}`,
+              updatedAt: now,
+            },
+          });
+      }
+
       const [session] = await db
         .update(sessionsTable)
         .set({
           status: nextStatus,
           providerFlowAddress: ethers.getAddress(providerFlowAddress),
           encryptedEndTime: normalizedPayload.handle,
-          endTxHash: settlement.settlementTxHash,
+          endTxHash,
           endImporterAddress: normalizedPayload.importerAddress,
           endInputProofHash: hashProof(normalizedPayload.inputProof),
           encryptedDuration: `offchain:${durationSeconds}s`,

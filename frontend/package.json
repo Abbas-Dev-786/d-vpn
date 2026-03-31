@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check:no-mocks": "if rg -n \"mock|simulate|0xMOCK|Math\\.random\" src/pages src/lib src/hooks; then echo 'Mock/simulated patterns found in runtime frontend code'; exit 1; fi",
     "preview": "vite preview"
   },
   "dependencies": {

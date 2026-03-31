@@ -177,7 +177,13 @@ export default function Nodes() {
                 <Button
                   variant="outline"
                   className="w-full text-xs h-9"
-                  onClick={() => withdrawMutation.mutate({ nodeId: node.nodeId, data: { callerEvmAddress: user?.evmAddress ?? node.address } })}
+                  onClick={() => withdrawMutation.mutate({
+                    nodeId: node.nodeId,
+                    data: {
+                      callerEvmAddress: user?.evmAddress ?? node.address,
+                      idempotencyKey: crypto.randomUUID(),
+                    },
+                  })}
                   disabled={withdrawMutation.isPending || withdrawMutation.variables?.nodeId === node.nodeId}
                 >
                   <DollarSign className="w-3 h-3 mr-1" />

@@ -3,14 +3,11 @@ import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "../config/db";
-import { nodesTable } from "../schema";
+import { nodesTable, providerClaimsTable, withdrawRequestsTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
+import { transferFlowFromTreasury } from "../lib/flow-settlement";
 
 const router: IRouter = Router();
-
-function simulateFheEncryptEarnings(): string {
-  return `0x${"fhe_earnings_" + randomUUID().replace(/-/g, "").slice(0, 51)}`;
-}
 
 router.get(
   "/nodes",
@@ -68,7 +65,6 @@ router.post(
     }
 
     const nodeId = `node_${randomUUID()}`;
-    const encryptedEarnings = simulateFheEncryptEarnings();
 
     try {
       const [node] = await db
@@ -80,12 +76,21 @@ router.post(
           name,
           location,
           isActive: true,
-          encryptedEarnings,
+          encryptedEarnings: "0x0",
           sessionCount: 0,
           uptimePercent: "99.9",
           registeredAt: new Date(),
         })
         .returning();
+      await db
+        .insert(providerClaimsTable)
+        .values({
+          nodeId,
+          providerFlowAddress: ethers.getAddress(flowAddress),
+          claimableAmount: "0",
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing();
 
       if (!node) {
         throw new Error("Failed to register node");
@@ -111,8 +116,15 @@ router.post(
   "/nodes/:nodeId/withdraw",
   asyncHandler(async (req, res) => {
     const { nodeId } = req.params;
-    const { callerAddress, callerEvmAddress } = req.body as { callerAddress?: string; callerEvmAddress?: string };
+    const { callerAddress, callerEvmAddress, idempotencyKey } = req.body as {
+      callerAddress?: string;
+      callerEvmAddress?: string;
+      idempotencyKey?: string;
+    };
     const resolvedCaller = callerEvmAddress ?? callerAddress;
+    const resolvedIdempotencyKey =
+      idempotencyKey ??
+      (typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined);
 
     const existing = await db
       .select()
@@ -139,29 +151,115 @@ router.post(
       });
       return;
     }
+    if (!resolvedIdempotencyKey) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "idempotencyKey is required",
+      });
+      return;
+    }
+    if (!node.flowAddress || !ethers.isAddress(node.flowAddress)) {
+      res.status(400).json({
+        error: "INVALID_NODE_CONFIG",
+        message: "Node does not have a valid provider Flow address",
+      });
+      return;
+    }
 
-    const txHash =
-      `0x${randomUUID().replace(/-/g, "")}${randomUUID().replace(/-/g, "")}`.slice(
-        0,
-        66,
-      );
-    const amount = (Math.random() * 50 + 1).toFixed(4);
+    const existingRequest = await db
+      .select()
+      .from(withdrawRequestsTable)
+      .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey))
+      .limit(1);
+    if (existingRequest.length > 0) {
+      const prior = existingRequest[0];
+      if (prior.status === "confirmed" && prior.txHash) {
+        res.json({
+          nodeId: prior.nodeId,
+          txHash: prior.txHash,
+          amount: String(prior.amount),
+          status: "confirmed",
+        });
+        return;
+      }
+      res.status(409).json({
+        error: "REQUEST_IN_PROGRESS",
+        message: "A withdrawal with this idempotency key is already being processed",
+      });
+      return;
+    }
 
-    const newEncryptedEarnings = simulateFheEncryptEarnings();
-    
+    const claims = await db
+      .select()
+      .from(providerClaimsTable)
+      .where(eq(providerClaimsTable.nodeId, nodeId))
+      .limit(1);
+    if (!claims.length || Number(claims[0].claimableAmount) <= 0) {
+      res.status(400).json({
+        error: "NO_CLAIMABLE_BALANCE",
+        message: "No claimable balance is available for this node",
+      });
+      return;
+    }
+    const claimableAmount = String(claims[0].claimableAmount);
+
     try {
-      await db
-        .update(nodesTable)
-        .set({ encryptedEarnings: newEncryptedEarnings })
-        .where(eq(nodesTable.nodeId, nodeId));
+      await db.insert(withdrawRequestsTable).values({
+        idempotencyKey: resolvedIdempotencyKey,
+        nodeId,
+        providerFlowAddress: ethers.getAddress(node.flowAddress),
+        amount: claimableAmount,
+        txHash: null,
+        status: "processing",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const transfer = await transferFlowFromTreasury({
+        recipientAddress: ethers.getAddress(node.flowAddress),
+        amountFlow: claimableAmount,
+        context: `node-withdraw:${nodeId}`,
+      });
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(providerClaimsTable)
+          .set({
+            claimableAmount: "0",
+            updatedAt: new Date(),
+          })
+          .where(eq(providerClaimsTable.nodeId, nodeId));
+
+        await tx
+          .update(withdrawRequestsTable)
+          .set({
+            txHash: transfer.txHash,
+            status: "confirmed",
+            updatedAt: new Date(),
+          })
+          .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey));
+
+        await tx
+          .update(nodesTable)
+          .set({ encryptedEarnings: "0x0" })
+          .where(eq(nodesTable.nodeId, nodeId));
+      });
 
       res.json({
         nodeId,
-        txHash,
-        amount,
-        status: "pending",
+        txHash: transfer.txHash,
+        amount: claimableAmount,
+        status: "confirmed",
       });
     } catch (err: any) {
+      await db
+        .update(withdrawRequestsTable)
+        .set({
+          status: "failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey));
+
       throw Object.assign(new Error("Failed to process withdrawal"), {
         statusCode: 500,
         code: "DATABASE_ERROR",

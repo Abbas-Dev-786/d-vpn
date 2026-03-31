@@ -147,6 +147,8 @@ export interface RegisterNodeRequest {
 export interface WithdrawNodeEarningsBody {
   /** The caller EVM address. Must match the node's registered EVM owner address. */
   callerEvmAddress: string;
+  /** Client-generated idempotency key for safe retries */
+  idempotencyKey: string;
 }
 
 export type WithdrawResponseStatus =
@@ -193,12 +195,19 @@ export const PaymentScheduleFrequency = {
 export interface PaymentSchedule {
   scheduleId: string;
   userAddress: string;
+  custodialWalletAddress?: string | null;
   budgetAmount: number;
   currency: string;
   frequency: PaymentScheduleFrequency;
   /** Flow blockchain Autopilot schedule ID */
   flowAutopilotId?: string;
+  scheduleTxHash?: string | null;
+  cadence?: string | null;
   nextDueAt: string;
+  lastRunAt?: string | null;
+  lastRunTxHash?: string | null;
+  lastRunStatus?: string | null;
+  failureReason?: string | null;
   isActive: boolean;
   createdAt: string;
 }

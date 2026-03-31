@@ -2,10 +2,13 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../config/db";
-import { paymentSchedulesTable } from "../schema";
+import { paymentSchedulesTable, userWalletsTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
+import { createFlowSchedule, getFlowSchedule } from "../lib/flow-scheduler";
+import { getRuntimeConfig } from "../config/runtime";
 
 const router: IRouter = Router();
+const runtime = getRuntimeConfig();
 
 router.post(
   "/payments/schedule",
@@ -22,24 +25,40 @@ router.post(
       frequency?: string;
     };
 
-    if (!userAddress || !budgetAmount) {
+    if (!userAddress || !budgetAmount || budgetAmount <= 0) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "userAddress and budgetAmount are required",
+        message: "userAddress and positive budgetAmount are required",
+      });
+      return;
+    }
+
+    const [wallet] = await db
+      .select()
+      .from(userWalletsTable)
+      .where(eq(userWalletsTable.flowAddress, userAddress))
+      .limit(1);
+    if (!wallet) {
+      res.status(404).json({
+        error: "NOT_FOUND",
+        message: "No wallet mapping exists for this Flow user",
       });
       return;
     }
 
     const scheduleId = `sched_${randomUUID()}`;
-    const flowAutopilotId = `autopilot_${randomUUID()}`;
     const now = new Date();
-    const nextDueAt = new Date(now);
-
-    if (frequency === "weekly") {
-      nextDueAt.setDate(nextDueAt.getDate() + 7);
-    } else {
-      nextDueAt.setMonth(nextDueAt.getMonth() + 1);
-    }
+    const createdSchedule = await createFlowSchedule({
+      flowUserAddress: userAddress,
+      custodialWalletAddress: wallet.userEvmAddress,
+      treasuryAddress: runtime.flowTreasuryAddress,
+      budgetAmount: String(budgetAmount),
+      frequency: frequency === "weekly" ? "weekly" : "monthly",
+      metadata: {
+        currency,
+      },
+    });
+    const nextDueAt = new Date(createdSchedule.nextRunAt);
 
     try {
       const [schedule] = await db
@@ -47,12 +66,19 @@ router.post(
         .values({
           scheduleId,
           userAddress,
+          custodialWalletAddress: wallet.userEvmAddress,
           budgetAmount: String(budgetAmount),
           currency,
           frequency: frequency as "monthly" | "weekly",
-          flowAutopilotId,
+          flowAutopilotId: createdSchedule.jobId,
+          scheduleTxHash: createdSchedule.scheduleTxHash,
+          cadence: createdSchedule.cadence,
           nextDueAt,
           isActive: true,
+          lastRunAt: null,
+          lastRunTxHash: null,
+          lastRunStatus: null,
+          failureReason: null,
           createdAt: now,
         })
         .returning();
@@ -65,6 +91,7 @@ router.post(
         ...schedule,
         budgetAmount: parseFloat(String(schedule.budgetAmount)),
         nextDueAt: schedule.nextDueAt.toISOString(),
+        lastRunAt: schedule.lastRunAt ? schedule.lastRunAt.toISOString() : null,
         createdAt: schedule.createdAt.toISOString(),
       });
     } catch (err: any) {
@@ -95,14 +122,40 @@ router.get(
       .where(eq(paymentSchedulesTable.userAddress, userAddress))
       .orderBy(paymentSchedulesTable.createdAt);
 
+    const refreshed = await Promise.all(
+      schedules.map(async (schedule) => {
+        if (!schedule.flowAutopilotId) return schedule;
+        try {
+          const status = await getFlowSchedule(schedule.flowAutopilotId);
+          const patch = {
+            nextDueAt: new Date(status.nextRunAt),
+            isActive: status.status === "active" || status.status === "pending",
+            lastRunAt: status.lastRunAt ? new Date(status.lastRunAt) : schedule.lastRunAt,
+            lastRunStatus: status.lastRunStatus ?? schedule.lastRunStatus,
+            lastRunTxHash: status.lastRunTxHash ?? schedule.lastRunTxHash,
+            failureReason: status.failureReason ?? null,
+          };
+          const [updated] = await db
+            .update(paymentSchedulesTable)
+            .set(patch)
+            .where(eq(paymentSchedulesTable.scheduleId, schedule.scheduleId))
+            .returning();
+          return updated ?? schedule;
+        } catch {
+          return schedule;
+        }
+      }),
+    );
+
     res.json({
-      schedules: schedules.map((s) => ({
+      schedules: refreshed.map((s) => ({
         ...s,
         budgetAmount: parseFloat(String(s.budgetAmount)),
         nextDueAt: s.nextDueAt.toISOString(),
+        lastRunAt: s.lastRunAt ? s.lastRunAt.toISOString() : null,
         createdAt: s.createdAt.toISOString(),
       })),
-      total: schedules.length,
+      total: refreshed.length,
     });
   })
 );
