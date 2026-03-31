@@ -15,7 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { encryptSessionTime, getDvpnContractAddress, getImporterAddress } from "@/lib/fhe"
 import { format } from "date-fns"
-import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin } from "lucide-react"
+import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin, ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,6 +30,8 @@ export default function Dashboard() {
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null)
   const [sessionStartTime, setSessionStartTime] = React.useState<number | null>(null)
   const [elapsedTime, setElapsedTime] = React.useState<string>("00:00:00")
+  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null)
+  const [nodeDropdownOpen, setNodeDropdownOpen] = React.useState(false)
 
   const [budgetAmount, setBudgetAmount] = React.useState("5.00")
   const [frequency, setFrequency] = React.useState<"monthly" | "weekly">("monthly")
@@ -120,9 +122,10 @@ export default function Dashboard() {
         toast({ title: "Encryption Failed", description: message, variant: "destructive" })
       }
     } else {
-      const firstNode = nodesData?.nodes?.[0]
-      if (!firstNode) {
-        toast({ title: "No Nodes Available", description: "Please wait or register a node first.", variant: "destructive" })
+      const activeNodes = nodesData?.nodes?.filter(n => n.isActive) ?? []
+      const targetNode = activeNodes.find(n => n.nodeId === selectedNodeId) ?? activeNodes[0]
+      if (!targetNode) {
+        toast({ title: "No Nodes Available", description: "Please select an active node or wait for one to come online.", variant: "destructive" })
         return
       }
       try {
@@ -135,7 +138,7 @@ export default function Dashboard() {
           data: {
             flowUserAddress: user.userAddress,
             userEvmAddress: user.evmAddress,
-            nodeId: firstNode.nodeId,
+            nodeId: targetNode.nodeId,
             encryptedStartTime,
           }
         })
@@ -158,17 +161,26 @@ export default function Dashboard() {
   }
 
   const isConnected = !!activeSessionId;
-  const activeNode = isConnected ? (nodesData?.nodes?.[0] ?? null) : null; // Mock finding the active node
+  const activeNodes = React.useMemo(() => nodesData?.nodes?.filter(n => n.isActive) ?? [], [nodesData])
+  const selectedNode = activeNodes.find(n => n.nodeId === selectedNodeId) ?? activeNodes[0] ?? null
+  const activeNode = isConnected ? selectedNode : null
+
+  // Auto-select first active node if nothing is selected
+  React.useEffect(() => {
+    if (!selectedNodeId && activeNodes.length > 0) {
+      setSelectedNodeId(activeNodes[0].nodeId)
+    }
+  }, [activeNodes, selectedNodeId])
 
   if (!user) return null
 
   return (
     <div className="space-y-8 pb-12">
       {/* VPN Connection Hero */}
-      <Card className="overflow-hidden border-0 bg-transparent shadow-none">
+      <Card className="border-0 bg-transparent shadow-none overflow-visible">
         <div className="grid md:grid-cols-2 gap-8 items-center">
 
-          <div className="flex flex-col items-center justify-center p-12 rounded-3xl border border-border/50 bg-card/40 backdrop-blur-md shadow-2xl relative overflow-hidden">
+          <div className="flex flex-col items-center justify-center p-12 rounded-3xl border border-border/50 bg-card/40 backdrop-blur-md shadow-2xl relative">
             {/* Pulsing background ring if connected */}
             {isConnected && (
               <motion.div
@@ -204,8 +216,61 @@ export default function Dashboard() {
                   </div>
                 </motion.div>
               ) : (
-                <div className="text-muted-foreground font-mono">
-                  SYSTEM STANDBY<br />Ready to encrypt traffic
+                <div className="space-y-3">
+                  {/* Node Selector Dropdown */}
+                  <div className="relative inline-block w-full max-w-xs">
+                    <button
+                      type="button"
+                      onClick={() => setNodeDropdownOpen(!nodeDropdownOpen)}
+                      className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl border border-border/60 bg-background/60 backdrop-blur-sm text-sm hover:border-primary/50 transition-all"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <MapPin className="w-4 h-4 text-primary shrink-0" />
+                        <span className="truncate">
+                          {selectedNode ? `${selectedNode.name} — ${selectedNode.location}` : "Select a node..."}
+                        </span>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${nodeDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {nodeDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="absolute z-50 mt-1 w-full rounded-xl border border-border/60 bg-card/95 backdrop-blur-md shadow-2xl overflow-hidden"
+                      >
+                        {activeNodes.length === 0 && (
+                          <div className="px-4 py-3 text-sm text-muted-foreground italic">No active nodes available</div>
+                        )}
+                        {activeNodes.map((node) => (
+                          <button
+                            key={node.nodeId}
+                            type="button"
+                            onClick={() => {
+                              setSelectedNodeId(node.nodeId)
+                              setNodeDropdownOpen(false)
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-primary/10 transition-colors ${
+                              selectedNodeId === node.nodeId ? 'bg-primary/5' : ''
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${node.isActive ? 'bg-primary' : 'bg-muted-foreground'}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate">{node.name}</div>
+                              <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />{node.location} · {node.uptimePercent}% uptime
+                              </div>
+                            </div>
+                            {selectedNodeId === node.nodeId && (
+                              <Check className="w-4 h-4 text-primary shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </div>
+                  <div className="text-muted-foreground font-mono text-sm">
+                    SYSTEM STANDBY · Ready to encrypt
+                  </div>
                 </div>
               )}
             </div>
@@ -387,11 +452,33 @@ export default function Dashboard() {
           </h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {nodesData.nodes.slice(0, 5).map((node) => (
-              <Card key={node.nodeId} className={`text-sm transition-all ${isConnected && activeNode?.nodeId === node.nodeId ? 'border-primary/60 shadow-[0_0_10px_rgba(0,255,65,0.2)]' : 'border-border/40'}`}>
+              <Card
+                key={node.nodeId}
+                onClick={() => {
+                  if (!isConnected && node.isActive) {
+                    setSelectedNodeId(node.nodeId)
+                    toast({ title: "Node Selected", description: `Will connect via ${node.name} (${node.location})` })
+                  }
+                }}
+                className={`text-sm transition-all ${
+                  !isConnected && node.isActive ? 'cursor-pointer hover:border-primary/40 hover:shadow-[0_0_8px_rgba(0,255,65,0.1)]' : ''
+                } ${
+                  selectedNodeId === node.nodeId
+                    ? 'border-primary/60 shadow-[0_0_10px_rgba(0,255,65,0.2)] ring-1 ring-primary/30'
+                    : isConnected && activeNode?.nodeId === node.nodeId
+                      ? 'border-primary/60 shadow-[0_0_10px_rgba(0,255,65,0.2)]'
+                      : 'border-border/40'
+                } ${!node.isActive ? 'opacity-50' : ''}`}
+              >
                 <CardContent className="p-3 space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold truncate text-xs">{node.name}</span>
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${node.isActive ? 'bg-primary' : 'bg-muted-foreground'}`} />
+                    <div className="flex items-center gap-1.5">
+                      {selectedNodeId === node.nodeId && !isConnected && (
+                        <Check className="w-3 h-3 text-primary" />
+                      )}
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${node.isActive ? 'bg-primary' : 'bg-muted-foreground'}`} />
+                    </div>
                   </div>
                   <div className="text-muted-foreground text-xs flex items-center gap-1">
                     <MapPin className="w-3 h-3 shrink-0" />{node.location}
