@@ -13,6 +13,7 @@
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
   },
   "dependencies": {
+    "@types/pg": "^8.20.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
     "dotenv": "^17.3.1",

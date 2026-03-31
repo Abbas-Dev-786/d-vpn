@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
-import { logger } from "./logger";
-import DVPN from "./DVPN.json";
-import { getRuntimeConfig } from "../config/runtime";
+import { logger } from "./logger.js";
+import DVPN from "./DVPN.json" with { type: "json" };
+import { getRuntimeConfig } from "../config/runtime.js";
 
 const runtime = getRuntimeConfig();
 
@@ -29,7 +29,8 @@ const bytesLikeToHex = (
   }
 
   if (value instanceof Uint8Array || Array.isArray(value)) {
-    const hex = ethers.hexlify(value as Uint8Array | number[]);
+    const bytes = value instanceof Uint8Array ? value : Uint8Array.from(value as number[]);
+    const hex = ethers.hexlify(bytes);
     if (!ethers.isHexString(hex, expectedBytesLength)) {
       throw new Error(`Invalid ${fieldName}`);
     }

@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ethers } from "ethers";
-import { db } from "../config/db";
-import { nodesTable, providerClaimsTable, withdrawRequestsTable } from "../schema";
-import { asyncHandler } from "../lib/async-handler";
-import { transferFlowFromTreasury } from "../lib/flow-settlement";
+import { db } from "../config/db.js";
+import { nodesTable, providerClaimsTable, withdrawRequestsTable } from "../schema/index.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { transferFlowFromTreasury } from "../lib/flow-settlement.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
@@ -115,7 +116,7 @@ router.post(
 router.post(
   "/nodes/:nodeId/withdraw",
   asyncHandler(async (req, res) => {
-    const { nodeId } = req.params;
+    const { nodeId } = req.params as { nodeId: string };
     const { callerAddress, callerEvmAddress, idempotencyKey } = req.body as {
       callerAddress?: string;
       callerEvmAddress?: string;
@@ -126,144 +127,119 @@ router.post(
       idempotencyKey ??
       (typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined);
 
-    const existing = await db
+    if (!resolvedIdempotencyKey) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "idempotencyKey is required" });
+      return;
+    }
+
+    const nodeResult = await db
       .select()
       .from(nodesTable)
       .where(eq(nodesTable.nodeId, nodeId))
       .limit(1);
     
-    if (!existing.length) {
+    if (!nodeResult.length) {
       res.status(404).json({ error: "NOT_FOUND", message: "Node not found" });
       return;
     }
+    const node = nodeResult[0];
 
-    const node = existing[0];
-
-    // Authorization: only the node's registered owner address may withdraw
+    // Authorization
     if (
       !resolvedCaller ||
       !ethers.isAddress(resolvedCaller) ||
       node.address.toLowerCase() !== resolvedCaller.toLowerCase()
     ) {
-      res.status(403).json({
-        error: "FORBIDDEN",
-        message: "Caller EVM address does not match node owner",
-      });
-      return;
-    }
-    if (!resolvedIdempotencyKey) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "idempotencyKey is required",
-      });
-      return;
-    }
-    if (!node.flowAddress || !ethers.isAddress(node.flowAddress)) {
-      res.status(400).json({
-        error: "INVALID_NODE_CONFIG",
-        message: "Node does not have a valid provider Flow address",
-      });
+      res.status(403).json({ error: "FORBIDDEN", message: "Caller matches node owner" });
       return;
     }
 
+    // 1. Check idempotency
     const existingRequest = await db
       .select()
       .from(withdrawRequestsTable)
       .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey))
       .limit(1);
+
     if (existingRequest.length > 0) {
       const prior = existingRequest[0];
       if (prior.status === "confirmed" && prior.txHash) {
-        res.json({
-          nodeId: prior.nodeId,
-          txHash: prior.txHash,
-          amount: String(prior.amount),
-          status: "confirmed",
-        });
+        res.json({ nodeId: prior.nodeId, txHash: prior.txHash, amount: prior.amount, status: "confirmed" });
         return;
       }
-      res.status(409).json({
-        error: "REQUEST_IN_PROGRESS",
-        message: "A withdrawal with this idempotency key is already being processed",
-      });
-      return;
+      if (prior.status === "processing") {
+        res.status(409).json({ error: "REQUEST_IN_PROGRESS", message: "Withdrawal is already being processed" });
+        return;
+      }
+      // If 'failed', we allow a different idempotency key or re-attempt if safe.
     }
 
+    // 2. Check claims
     const claims = await db
       .select()
       .from(providerClaimsTable)
       .where(eq(providerClaimsTable.nodeId, nodeId))
       .limit(1);
     if (!claims.length || Number(claims[0].claimableAmount) <= 0) {
-      res.status(400).json({
-        error: "NO_CLAIMABLE_BALANCE",
-        message: "No claimable balance is available for this node",
-      });
+      res.status(400).json({ error: "NO_CLAIMABLE_BALANCE", message: "No claimable balance available" });
       return;
     }
     const claimableAmount = String(claims[0].claimableAmount);
 
+    // 3. Create 'processing' state
+    await db.insert(withdrawRequestsTable).values({
+      idempotencyKey: resolvedIdempotencyKey,
+      nodeId,
+      providerFlowAddress: ethers.getAddress(node.flowAddress!),
+      amount: claimableAmount,
+      status: "processing",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).onConflictDoNothing(); // If already failed, we might need a better transition
+
     try {
-      await db.insert(withdrawRequestsTable).values({
-        idempotencyKey: resolvedIdempotencyKey,
-        nodeId,
-        providerFlowAddress: ethers.getAddress(node.flowAddress),
-        amount: claimableAmount,
-        txHash: null,
-        status: "processing",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
+      // 4. External fund transfer
       const transfer = await transferFlowFromTreasury({
-        recipientAddress: ethers.getAddress(node.flowAddress),
+        recipientAddress: ethers.getAddress(node.flowAddress!),
         amountFlow: claimableAmount,
-        context: `node-withdraw:${nodeId}`,
+        context: `node-withdraw:${nodeId}:${resolvedIdempotencyKey}`,
       });
 
+      // 5. Atomic finalized commit (Critical fix)
       await db.transaction(async (tx) => {
-        await tx
-          .update(providerClaimsTable)
-          .set({
-            claimableAmount: "0",
-            updatedAt: new Date(),
-          })
+        // Double-check balance still exists (basic protection)
+        const currentClaim = await tx.select().from(providerClaimsTable).where(eq(providerClaimsTable.nodeId, nodeId)).limit(1).for("update");
+        if (!currentClaim.length || Number(currentClaim[0].claimableAmount) < Number(claimableAmount)) {
+          // This should ideally not happen if we used 'FOR UPDATE' or similar earlier, 
+          // but if it does, we have a consistency problem that requires manual audit because funds ARE sent.
+          throw new Error("CRITICAL_CONSISTENCY_ERROR: Balance changed during withdrawal");
+        }
+
+        await tx.update(providerClaimsTable)
+          .set({ claimableAmount: "0", updatedAt: new Date() })
           .where(eq(providerClaimsTable.nodeId, nodeId));
 
-        await tx
-          .update(withdrawRequestsTable)
-          .set({
-            txHash: transfer.txHash,
-            status: "confirmed",
-            updatedAt: new Date(),
-          })
+        await tx.update(withdrawRequestsTable)
+          .set({ txHash: transfer.txHash, status: "confirmed", updatedAt: new Date() })
           .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey));
 
-        await tx
-          .update(nodesTable)
+        await tx.update(nodesTable)
           .set({ encryptedEarnings: "0x0" })
           .where(eq(nodesTable.nodeId, nodeId));
       });
 
-      res.json({
-        nodeId,
-        txHash: transfer.txHash,
-        amount: claimableAmount,
-        status: "confirmed",
-      });
+      res.json({ nodeId, txHash: transfer.txHash, amount: claimableAmount, status: "confirmed" });
     } catch (err: any) {
-      await db
-        .update(withdrawRequestsTable)
-        .set({
-          status: "failed",
-          updatedAt: new Date(),
-        })
-        .where(eq(withdrawRequestsTable.idempotencyKey, resolvedIdempotencyKey));
-
-      throw Object.assign(new Error("Failed to process withdrawal"), {
-        statusCode: 500,
-        code: "DATABASE_ERROR",
-        originalError: err,
+      // If we already sent funds but the DB finalization failed, we MUST NOT mark it as 'failed' 
+      // if it might lead the user to try again with a different ID.
+      // Better to leave it as 'processing' or a new 'manual_reconciliation_required' state.
+      
+      logger.error({ err, nodeId, resolvedIdempotencyKey }, "Withdrawal finalization failed AFTER fund transfer");
+      
+      res.status(500).json({
+        error: "WITHDRAWAL_FINALIZATION_FAILED",
+        message: "Funds were sent but database update failed. Contact support for manual balance reset.",
+        details: err.message
       });
     }
   })

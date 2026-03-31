@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { ethers } from "ethers";
-import { getRuntimeConfig } from "../config/runtime";
+import { getRuntimeConfig } from "../config/runtime.js";
 
 const runtime = getRuntimeConfig();
 
@@ -38,4 +38,3 @@ export const decryptPrivateKey = (encoded: string): string => {
   ]);
   return plaintext.toString("utf8");
 };
-

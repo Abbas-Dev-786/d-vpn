@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
-import { db } from "../config/db";
-import { paymentSchedulesTable, userWalletsTable } from "../schema";
-import { asyncHandler } from "../lib/async-handler";
-import { createFlowSchedule, getFlowSchedule } from "../lib/flow-scheduler";
-import { getRuntimeConfig } from "../config/runtime";
+import { db } from "../config/db.js";
+import { paymentSchedulesTable, userWalletsTable } from "../schema/index.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { createFlowSchedule, getFlowSchedule } from "../lib/flow-scheduler.js";
+import { getRuntimeConfig } from "../config/runtime.js";
 
 const router: IRouter = Router();
 const runtime = getRuntimeConfig();

@@ -3,11 +3,13 @@ import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { eq, desc, sql } from "drizzle-orm";
 import { ethers } from "ethers";
-import { db } from "../config/db";
-import { sessionsTable, nodesTable, providerClaimsTable, userWalletsTable } from "../schema";
-import { asyncHandler } from "../lib/async-handler";
-import { settleFlowForSession } from "../lib/flow-settlement";
-import { startSessionOnChain, endSessionOnChain } from "../lib/zama-relayer";
+import { db } from "../config/db.js";
+import { sessionsTable, nodesTable, providerClaimsTable, userWalletsTable } from "../schema/index.js";
+import { asyncHandler } from "../lib/async-handler.js";
+import { settleFlowForSession } from "../lib/flow-settlement.js";
+import { startSessionOnChain, endSessionOnChain } from "../lib/zama-relayer.js";
+import { authMiddleware } from "../middlewares/auth.js";
+import type { AuthenticatedRequest } from "../types/index.js";
 
 const router: IRouter = Router();
 const HASH_PREFIX = "0x";
@@ -35,7 +37,8 @@ const bytesLikeToHex = (
   }
 
   if (value instanceof Uint8Array || Array.isArray(value)) {
-    const hex = ethers.hexlify(value as Uint8Array | number[]);
+    const bytes = value instanceof Uint8Array ? value : Uint8Array.from(value as number[]);
+    const hex = ethers.hexlify(bytes);
     if (!ethers.isHexString(hex, expectedBytesLength)) {
       throw new Error(`Invalid ${fieldName}`);
     }
@@ -82,7 +85,8 @@ const normalizeEncryptedPayload = (
 
 router.post(
   "/sessions/start",
-  asyncHandler(async (req, res) => {
+  authMiddleware,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { flowUserAddress, userAddress, userEvmAddress, nodeId, encryptedStartTime } = req.body as {
       flowUserAddress?: string;
       userAddress?: string;
@@ -99,6 +103,16 @@ router.post(
       });
       return;
     }
+
+    // Security check: ensure authenticated user matches the session owner
+    if (normalizedFlowAddress.toLowerCase() !== req.user?.flowAddress.toLowerCase()) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Unauthorized: session owner must be the authenticated user",
+      });
+      return;
+    }
+
     if (!ethers.isAddress(userEvmAddress)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
@@ -196,10 +210,10 @@ router.post(
         })
         .returning();
 
-      // Update node session count
+      // Update node session count atomically
       await db
         .update(nodesTable)
-        .set({ sessionCount: (node[0].sessionCount ?? 0) + 1 })
+        .set({ sessionCount: sql`${nodesTable.sessionCount} + 1` })
         .where(eq(nodesTable.nodeId, nodeId));
 
       res.status(201).json(session);
@@ -215,7 +229,8 @@ router.post(
 
 router.post(
   "/sessions/end",
-  asyncHandler(async (req, res) => {
+  authMiddleware,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { sessionId, encryptedEndTime } = req.body as {
       sessionId: string;
       encryptedEndTime: string | EncryptedInputPayload;
@@ -242,6 +257,15 @@ router.post(
         res
           .status(404)
           .json({ error: "NOT_FOUND", message: "Session not found" });
+        return;
+      }
+
+      // Security check: ensure authenticated user owns this session
+      if (existing[0].userAddress.toLowerCase() !== req.user?.flowAddress.toLowerCase()) {
+        res.status(403).json({
+          error: "FORBIDDEN",
+          message: "Unauthorized: you do not own this session",
+        });
         return;
       }
 
@@ -363,13 +387,23 @@ router.post(
 
 router.get(
   "/sessions/history",
-  asyncHandler(async (req, res) => {
+  authMiddleware,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { userAddress } = req.query as { userAddress?: string };
 
     if (!userAddress) {
       res
         .status(400)
         .json({ error: "VALIDATION_ERROR", message: "userAddress is required" });
+      return;
+    }
+
+    // Security check: ensure authenticated user only requests their own history
+    if (userAddress.toLowerCase() !== req.user?.flowAddress.toLowerCase()) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Unauthorized: you can only view your own history",
+      });
       return;
     }
 

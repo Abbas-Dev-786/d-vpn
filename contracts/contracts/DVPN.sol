@@ -72,6 +72,11 @@ contract DVPN is ZamaEthereumConfig {
 
         euint64 endTime = FHE.fromExternal(inputEndTime, inputProof);
         
+        // SECURITY FIX: Prevent wrap-around by ensuring endTime >= startTime
+        // Although timestamps *should* always be increasing, a malicious user could provide 
+        // a smaller endTime to exploit modular subtraction and grant near-infinite funds.
+        FHE.require(FHE.ge(endTime, session.encryptedStartTime));
+
         // Compute duration entirely on ciphertext: duration = endTime - startTime.
         euint64 duration = FHE.sub(endTime, session.encryptedStartTime);
 

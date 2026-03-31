@@ -1,7 +1,7 @@
 import "dotenv/config";
-import app from "./app";
-import { logger } from "./lib/logger";
-import { assertCriticalRuntimeConfig } from "./config/runtime";
+import app from "./app.js";
+import { logger } from "./lib/logger.js";
+import { assertCriticalRuntimeConfig } from "./config/runtime.js";
 
 const rawPort = process.env["PORT"];
 

@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
-import { logger } from "./logger";
-import { getRuntimeConfig } from "../config/runtime";
+import { logger } from "./logger.js";
+import { getRuntimeConfig } from "../config/runtime.js";
 
 const runtime = getRuntimeConfig();
 const FLOW_RATE_PER_SECOND = process.env.FLOW_RATE_PER_SECOND || "0.00001";

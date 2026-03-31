@@ -2,13 +2,14 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "crypto";
 import { ethers } from "ethers";
 import { eq } from "drizzle-orm";
-import { db } from "../config/db";
-import { userWalletsTable } from "../schema";
-import { createCustodialWallet } from "../lib/custodial-keys";
+import { db } from "../config/db.js";
+import { userWalletsTable, authSessionsTable } from "../schema/index.js";
+import { createCustodialWallet } from "../lib/custodial-keys.js";
+import { asyncHandler } from "../lib/async-handler.js";
 
 const router: IRouter = Router();
 
-router.post("/auth/flow", async (req, res) => {
+router.post("/auth/flow", asyncHandler(async (req, res) => {
   const { method, credential, userAddress, userEvmAddress } = req.body as {
     method: string;
     credential?: string;
@@ -32,6 +33,11 @@ router.post("/auth/flow", async (req, res) => {
     return;
   }
 
+  if (!credential) {
+    res.status(400).json({ error: "BAD_REQUEST", message: "credential (signature) is required" });
+    return;
+  }
+
   const flowAccountId = userAddress;
   const existing = await db
     .select()
@@ -43,29 +49,33 @@ router.post("/auth/flow", async (req, res) => {
   let resolvedUserEvmAddress: string;
   let custodialPrivateKeyCiphertext: string | null = null;
 
-  if (existing.length > 0) {
+  if (!isNewUser) {
     resolvedUserEvmAddress = existing[0].userEvmAddress;
   } else if (userEvmAddress && ethers.isAddress(userEvmAddress)) {
-    if (!credential) {
-      res.status(400).json({
-        error: "BAD_REQUEST",
-        message: "credential is required when providing userEvmAddress",
-      });
-      return;
-    }
-    const recovered = ethers.verifyMessage(`flow-auth:${flowAccountId}`, credential);
-    if (recovered.toLowerCase() !== userEvmAddress.toLowerCase()) {
-      res.status(401).json({
-        error: "UNAUTHORIZED",
-        message: "credential signature does not match userEvmAddress",
-      });
-      return;
-    }
-    resolvedUserEvmAddress = ethers.getAddress(recovered);
+    resolvedUserEvmAddress = ethers.getAddress(userEvmAddress);
   } else {
+    // New user without provided EVM address -> create custodial wallet
     const custodial = createCustodialWallet();
     resolvedUserEvmAddress = custodial.address;
     custodialPrivateKeyCiphertext = custodial.privateKeyCiphertext;
+  }
+
+  // Mandatory credential verification for ALL users
+  try {
+    const recovered = ethers.verifyMessage(`flow-auth:${flowAccountId}`, credential);
+    if (recovered.toLowerCase() !== resolvedUserEvmAddress.toLowerCase()) {
+      res.status(401).json({
+        error: "UNAUTHORIZED",
+        message: "credential signature does not match target EVM address",
+      });
+      return;
+    }
+  } catch (err) {
+    res.status(401).json({
+      error: "UNAUTHORIZED",
+      message: "Failed to verify credential signature",
+    });
+    return;
   }
 
   if (isNewUser) {
@@ -75,7 +85,7 @@ router.post("/auth/flow", async (req, res) => {
       custodialPrivateKeyCiphertext,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    }).onConflictDoNothing();
   }
 
   const displayName =
@@ -88,6 +98,14 @@ router.post("/auth/flow", async (req, res) => {
           : "Flow User (Email)";
 
   const sessionToken = `flow-${randomUUID()}`;
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+  await db.insert(authSessionsTable).values({
+    sessionToken,
+    flowAddress: flowAccountId,
+    expiresAt,
+    createdAt: new Date(),
+  });
 
   res.json({
     userAddress: flowAccountId,
@@ -95,8 +113,9 @@ router.post("/auth/flow", async (req, res) => {
     flowAccountId,
     userEvmAddress: resolvedUserEvmAddress,
     sessionToken,
+    expiresAt: expiresAt.toISOString(),
     isNewUser,
   });
-});
+}));
 
 export default router;

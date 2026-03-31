@@ -5,7 +5,8 @@
  * Confidential-X4PN dVPN API - encrypted session management, node registry, and Flow payment scheduling
  * OpenAPI spec version: 0.1.0
  */
-import type { Session } from "./session";
+import type { Session } from "./session.js";
+import type { PaymentSchedule } from "./paymentSchedule.js";
 
 export interface SessionHistoryResponse {
   sessions: Session[];

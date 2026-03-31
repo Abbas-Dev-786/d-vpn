@@ -5,7 +5,7 @@
  * Confidential-X4PN dVPN API - encrypted session management, node registry, and Flow payment scheduling
  * OpenAPI spec version: 0.1.0
  */
-import type { WithdrawResponseStatus } from "./withdrawResponseStatus";
+import type { WithdrawResponseStatus } from "./withdrawResponseStatus.js";
 
 export interface WithdrawResponse {
   nodeId: string;
