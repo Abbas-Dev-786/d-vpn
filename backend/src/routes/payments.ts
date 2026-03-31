@@ -49,6 +49,7 @@ router.post(
     const scheduleId = `sched_${randomUUID()}`;
     const now = new Date();
     const createdSchedule = await createFlowSchedule({
+      scheduleId,
       flowUserAddress: userAddress,
       custodialWalletAddress: wallet.userEvmAddress,
       treasuryAddress: runtime.flowTreasuryAddress,
