@@ -89,6 +89,24 @@ export const initRelayer = () => {
     throw err;
   }
 };
+/**
+ * Fetch the latest confirmed nonce and current fee data with a buffer
+ * to avoid REPLACEMENT_UNDERPRICED errors from stuck pending txs.
+ */
+const getTxOverrides = async (): Promise<ethers.Overrides> => {
+  const nonce = await provider.getTransactionCount(relayerWallet.address, "latest");
+  const feeData = await provider.getFeeData();
+  const overrides: ethers.Overrides = { nonce };
+  if (feeData.maxFeePerGas) {
+    overrides.maxFeePerGas = (feeData.maxFeePerGas * 3n) / 2n;
+    overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas
+      ? (feeData.maxPriorityFeePerGas * 3n) / 2n
+      : feeData.maxFeePerGas / 5n;
+  } else if (feeData.gasPrice) {
+    overrides.gasPrice = (feeData.gasPrice * 3n) / 2n;
+  }
+  return overrides;
+};
 
 /**
  * Acts as the trusted relayer to start a session on the Zama fhEVM network.
@@ -112,7 +130,8 @@ export const startSessionOnChain = async (
 
     logger.info({ userEvmAddress, nodeProviderEvmAddress, importerAddress: payload.importerAddress }, "Relaying startSession to Zama fhEVM...");
 
-    const tx = await dvpnContract.startSession(userEvmAddress, nodeProviderEvmAddress, payload.handle, payload.inputProof);
+    const overrides = await getTxOverrides();
+    const tx = await dvpnContract.startSession(userEvmAddress, nodeProviderEvmAddress, payload.handle, payload.inputProof, overrides);
     await tx.wait();
 
     return tx.hash;
@@ -143,7 +162,8 @@ export const endSessionOnChain = async (
 
     logger.info({ userEvmAddress, importerAddress: payload.importerAddress }, "Relaying endConfidentialSession to Zama fhEVM...");
 
-    const tx = await dvpnContract.endConfidentialSession(userEvmAddress, payload.handle, payload.inputProof);
+    const overrides = await getTxOverrides();
+    const tx = await dvpnContract.endConfidentialSession(userEvmAddress, payload.handle, payload.inputProof, overrides);
     await tx.wait();
 
     return tx.hash;

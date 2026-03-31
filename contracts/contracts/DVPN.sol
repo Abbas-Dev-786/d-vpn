@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 pragma solidity ^0.8.24;
 
-import {FHE, euint64, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
+import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 
 contract DVPN is ZamaEthereumConfig {
@@ -65,36 +65,35 @@ contract DVPN is ZamaEthereumConfig {
 
     /// @notice Ends an active dVPN session, computing duration and updating provider balance
     /// @dev Can be called by the user OR the node provider (Dual-termination).
-    function endConfidentialSession(address _user, externalEuint64 inputEndTime, bytes calldata inputProof) external {
-        Session storage session = activeSessions[_user];
-        require(session.isActive, "No active session");
-        require(msg.sender == _user || msg.sender == session.nodeProvider || msg.sender == trustedRelayer, "Unauthorized");
+   function endConfidentialSession(address _user, externalEuint64 inputEndTime, bytes calldata inputProof) external {
+    Session storage session = activeSessions[_user];
+    require(session.isActive, "No active session");
+    require(msg.sender == _user || msg.sender == session.nodeProvider || msg.sender == trustedRelayer, "Unauthorized");
 
-        euint64 endTime = FHE.fromExternal(inputEndTime, inputProof);
-        
-        // SECURITY FIX: Prevent wrap-around by ensuring endTime >= startTime
-        // Although timestamps *should* always be increasing, a malicious user could provide 
-        // a smaller endTime to exploit modular subtraction and grant near-infinite funds.
-        FHE.require(FHE.ge(endTime, session.encryptedStartTime));
+    euint64 endTime = FHE.fromExternal(inputEndTime, inputProof);
 
-        // Compute duration entirely on ciphertext: duration = endTime - startTime.
-        euint64 duration = FHE.sub(endTime, session.encryptedStartTime);
+    // SECURITY FIX: If endTime < startTime, set duration to 0 instead of reverting
+    // (we cannot revert based on encrypted values — use FHE.select instead)
+    ebool isValid = FHE.ge(endTime, session.encryptedStartTime);
 
-        // Compute payment: payment = duration * ratePerSecond.
-        euint64 payment = FHE.mul(duration, FHE.asEuint64(ratePerSecond));
+    euint64 rawDuration = FHE.sub(endTime, session.encryptedStartTime);
 
-        // Add payment to node provider's encrypted balance.
-        providerBalances[session.nodeProvider] = FHE.add(providerBalances[session.nodeProvider], payment);
+    // If invalid (endTime < startTime), duration becomes 0 → payment becomes 0
+    euint64 duration = FHE.select(isValid, rawDuration, FHE.asEuint64(0));
 
-        // Grant FHE decryption permissions to the Node Provider
-        // allowThis() lets the contract operate on it, allow() lets the provider view it off-chain.
-        FHE.allowThis(providerBalances[session.nodeProvider]);
-        FHE.allow(providerBalances[session.nodeProvider], session.nodeProvider);
+    // Compute payment: duration * ratePerSecond
+    euint64 payment = FHE.mul(duration, FHE.asEuint64(ratePerSecond));
 
-        session.isActive = false;
-        
-        emit SessionEnded(_user, session.nodeProvider, false);
-    }
+    // Add payment to provider's encrypted balance
+    providerBalances[session.nodeProvider] = FHE.add(providerBalances[session.nodeProvider], payment);
+
+    FHE.allowThis(providerBalances[session.nodeProvider]);
+    FHE.allow(providerBalances[session.nodeProvider], session.nodeProvider);
+
+    session.isActive = false;
+
+    emit SessionEnded(_user, session.nodeProvider, false);
+}
 
     /// @notice Failsafe timeout resolver (can be called by anyone to clear hanging sessions)
     function resolveTimeoutSession(address _user) external {
