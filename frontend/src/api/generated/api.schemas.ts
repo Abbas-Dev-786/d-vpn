@@ -59,7 +59,7 @@ export interface EncryptedInputPayload {
 export interface StartSessionRequest {
   /** User's Flow account address */
   flowUserAddress: string;
-  /** EVM address used for Zama host-chain transactions */
+  /** Optional legacy EVM identity */
   userEvmAddress: string;
   /** Selected VPN node ID */
   nodeId: string;
@@ -85,6 +85,7 @@ export interface Session {
   sessionId: string;
   userAddress: string;
   userEvmAddress?: string | null;
+  providerFlowAddress?: string | null;
   nodeId: string;
   status: SessionStatus;
   /** FHE-encrypted start timestamp (euint64 ciphertext) */
@@ -95,6 +96,12 @@ export interface Session {
   encryptedDuration?: string | null;
   /** FHE-computed payment amount (euint64 ciphertext) */
   encryptedAmount?: string | null;
+  settlementToken?: string | null;
+  settlementAmount?: string | null;
+  settlementTxHash?: string | null;
+  settlementStatus?: string | null;
+  settlementFailureReason?: string | null;
+  settledAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -132,7 +139,7 @@ export interface NodeListResponse {
 
 export interface RegisterNodeRequest {
   evmAddress: string;
-  flowAddress?: string;
+  flowAddress: string;
   name: string;
   location: string;
 }

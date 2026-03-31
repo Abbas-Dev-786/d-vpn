@@ -45,10 +45,10 @@ router.post(
     };
     const resolvedEvmAddress = evmAddress ?? address;
 
-    if (!resolvedEvmAddress || !name || !location) {
+    if (!resolvedEvmAddress || !flowAddress || !name || !location) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "evmAddress (or address), name, and location are required",
+        message: "evmAddress (or address), flowAddress, name, and location are required",
       });
       return;
     }
@@ -56,6 +56,13 @@ router.post(
       res.status(400).json({
         error: "VALIDATION_ERROR",
         message: "evmAddress must be a valid EVM address",
+      });
+      return;
+    }
+    if (!ethers.isAddress(flowAddress)) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "flowAddress must be a valid Flow EVM address",
       });
       return;
     }
@@ -69,7 +76,7 @@ router.post(
         .values({
           nodeId,
           address: ethers.getAddress(resolvedEvmAddress),
-          flowAddress: flowAddress ?? null,
+          flowAddress: ethers.getAddress(flowAddress),
           name,
           location,
           isActive: true,

@@ -6,11 +6,17 @@ import { ethers } from "ethers";
 import { db } from "../config/db";
 import { sessionsTable, nodesTable } from "../schema";
 import { asyncHandler } from "../lib/async-handler";
-import { startSessionOnChain, endSessionOnChain, type EncryptedInputPayload } from "../lib/zama-relayer";
+import { settleFlowForSession } from "../lib/flow-settlement";
 
 const router: IRouter = Router();
 const HASH_PREFIX = "0x";
-const LEGACY_PROVIDER_EVM_ENV = process.env.LEGACY_NODE_PROVIDER_EVM;
+
+type EncryptedInputPayload = {
+  handle: string;
+  inputProof: string;
+  importerAddress: string;
+  source?: "relayer-sdk";
+};
 
 const hashProof = (proof: string): string =>
   `${HASH_PREFIX}${createHash("sha256").update(proof).digest("hex")}`;
@@ -73,11 +79,6 @@ const normalizeEncryptedPayload = (
   };
 };
 
-const deriveLegacyProviderEvmAddress = (seed: string): string => {
-  const hash = ethers.keccak256(ethers.toUtf8Bytes(seed));
-  return ethers.getAddress(`0x${hash.slice(-40)}`);
-};
-
 router.post(
   "/sessions/start",
   asyncHandler(async (req, res) => {
@@ -90,14 +91,14 @@ router.post(
     };
     const normalizedFlowAddress = flowUserAddress ?? userAddress;
 
-    if (!normalizedFlowAddress || !nodeId || !encryptedStartTime || !userEvmAddress) {
+    if (!normalizedFlowAddress || !nodeId || !encryptedStartTime) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
-        message: "flowUserAddress (or userAddress), userEvmAddress, nodeId, and encryptedStartTime are required",
+        message: "flowUserAddress (or userAddress), nodeId, and encryptedStartTime are required",
       });
       return;
     }
-    if (!ethers.isAddress(userEvmAddress)) {
+    if (userEvmAddress && !ethers.isAddress(userEvmAddress)) {
       res.status(400).json({
         error: "VALIDATION_ERROR",
         message: "userEvmAddress must be a valid EVM address",
@@ -121,42 +122,39 @@ router.post(
           .json({ error: "NOT_FOUND", message: "Active node not found" });
         return;
       }
-      let nodeProviderEvmAddress: string;
-      if (ethers.isAddress(node[0].address)) {
-        nodeProviderEvmAddress = ethers.getAddress(node[0].address);
-      } else {
-        // Backward compatibility for legacy DB rows created before EVM address validation.
-        const fallbackProvider = LEGACY_PROVIDER_EVM_ENV && ethers.isAddress(LEGACY_PROVIDER_EVM_ENV)
-          ? ethers.getAddress(LEGACY_PROVIDER_EVM_ENV)
-          : deriveLegacyProviderEvmAddress(node[0].nodeId);
-        nodeProviderEvmAddress = fallbackProvider;
 
+      let providerFlowAddress: string | null = null;
+      if (node[0].flowAddress && ethers.isAddress(node[0].flowAddress)) {
+        providerFlowAddress = ethers.getAddress(node[0].flowAddress);
+      } else if (node[0].address && ethers.isAddress(node[0].address)) {
+        providerFlowAddress = ethers.getAddress(node[0].address);
         await db
           .update(nodesTable)
-          .set({ address: nodeProviderEvmAddress })
+          .set({ flowAddress: providerFlowAddress })
           .where(eq(nodesTable.nodeId, node[0].nodeId));
+      }
+
+      if (!providerFlowAddress) {
+        res.status(400).json({
+          error: "INVALID_NODE_CONFIG",
+          message: "Selected node does not have a valid provider Flow address",
+        });
+        return;
       }
 
       const sessionId = `sess_${randomUUID()}`;
       const now = new Date();
-
-      // Submit encrypted payload through the trusted relayer.
-      const txHash = await startSessionOnChain(
-        ethers.getAddress(userEvmAddress),
-        nodeProviderEvmAddress,
-        normalizedPayload,
-      );
 
       const [session] = await db
         .insert(sessionsTable)
         .values({
           sessionId,
           userAddress: normalizedFlowAddress,
-          userEvmAddress: ethers.getAddress(userEvmAddress),
+          userEvmAddress: userEvmAddress ? ethers.getAddress(userEvmAddress) : null,
+          providerFlowAddress,
           nodeId,
           status: "active",
           encryptedStartTime: normalizedPayload.handle,
-          startTxHash: txHash,
           startImporterAddress: normalizedPayload.importerAddress,
           startInputProofHash: hashProof(normalizedPayload.inputProof),
           createdAt: now,
@@ -202,7 +200,7 @@ router.post(
 
       const existing = await db
         .select()
-      .from(sessionsTable)
+        .from(sessionsTable)
         .where(eq(sessionsTable.sessionId, sessionId))
         .limit(1);
 
@@ -219,28 +217,70 @@ router.post(
           .json({ error: "BAD_REQUEST", message: "Session already ended" });
         return;
       }
+      if (existing[0].status === "settled") {
+        res
+          .status(400)
+          .json({ error: "BAD_REQUEST", message: "Session already settled" });
+        return;
+      }
 
       const now = new Date();
-      const userEvmAddress = existing[0].userEvmAddress;
-      if (!userEvmAddress || !ethers.isAddress(userEvmAddress)) {
+      const durationSeconds = Math.max(
+        1,
+        Math.ceil((now.getTime() - existing[0].createdAt.getTime()) / 1000),
+      );
+
+      let providerFlowAddress = existing[0].providerFlowAddress ?? null;
+      if (!providerFlowAddress || !ethers.isAddress(providerFlowAddress)) {
+        const node = await db
+          .select()
+          .from(nodesTable)
+          .where(eq(nodesTable.nodeId, existing[0].nodeId))
+          .limit(1);
+        if (node[0]?.flowAddress && ethers.isAddress(node[0].flowAddress)) {
+          providerFlowAddress = ethers.getAddress(node[0].flowAddress);
+        } else if (node[0]?.address && ethers.isAddress(node[0].address)) {
+          providerFlowAddress = ethers.getAddress(node[0].address);
+          await db
+            .update(nodesTable)
+            .set({ flowAddress: providerFlowAddress })
+            .where(eq(nodesTable.nodeId, existing[0].nodeId));
+        }
+      }
+
+      if (!providerFlowAddress || !ethers.isAddress(providerFlowAddress)) {
         res.status(500).json({
           error: "INVALID_SESSION_CONFIG",
-          message: "Session is missing userEvmAddress",
+          message: "Session is missing a valid provider Flow address",
         });
         return;
       }
 
-      // Submit encrypted payload through trusted relayer for homomorphic settlement.
-      const txHash = await endSessionOnChain(ethers.getAddress(userEvmAddress), normalizedPayload);
+      const settlement = await settleFlowForSession({
+        sessionId,
+        providerFlowAddress: ethers.getAddress(providerFlowAddress),
+        durationSeconds,
+      });
+      const nextStatus = settlement.settlementStatus === "submitted" ? "settled" : "ended";
 
       const [session] = await db
         .update(sessionsTable)
         .set({
-          status: "ended",
+          status: nextStatus,
+          providerFlowAddress: ethers.getAddress(providerFlowAddress),
           encryptedEndTime: normalizedPayload.handle,
-          endTxHash: txHash,
+          endTxHash: settlement.settlementTxHash,
           endImporterAddress: normalizedPayload.importerAddress,
           endInputProofHash: hashProof(normalizedPayload.inputProof),
+          encryptedDuration: `offchain:${durationSeconds}s`,
+          encryptedAmount: `offchain:${settlement.settlementAmountFlow}`,
+          settlementToken: settlement.settlementToken,
+          settlementAmount: settlement.settlementAmountFlow,
+          settlementTxHash: settlement.settlementTxHash,
+          settlementStatus: settlement.settlementStatus,
+          settlementFailureReason: settlement.settlementFailureReason,
+          settlementAttemptCount: settlement.settlementAttemptCount,
+          settledAt: settlement.settledAt,
           updatedAt: now,
         })
         .where(eq(sessionsTable.sessionId, sessionId))

@@ -13,7 +13,6 @@ import {
   getListPaymentSchedulesQueryKey
 } from "@/api"
 import { useQueryClient } from "@tanstack/react-query"
-import { FheBadge } from "@/components/fhe-badge"
 import { encryptSessionTime, getDvpnContractAddress, getImporterAddress } from "@/lib/fhe"
 import { format } from "date-fns"
 import { Power, Activity, ShieldAlert, Lock, Clock, Calendar, Zap, MapPin } from "lucide-react"
@@ -62,11 +61,13 @@ export default function Dashboard() {
 
   const endMutation = useEndSession({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (data) => {
         setActiveSessionId(null)
         setSessionStartTime(null)
         setElapsedTime("00:00:00")
-        toast({ title: "VPN Disconnected", description: "Session ended. Payment settled confidentially.", variant: "default" })
+        const txSnippet = data.settlementTxHash ? ` Tx: ${data.settlementTxHash.substring(0, 10)}...` : ""
+        const settlement = data.settlementStatus ? `Settlement: ${data.settlementStatus}.` : "Settlement queued."
+        toast({ title: "VPN Disconnected", description: `${settlement}${txSnippet}`, variant: "default" })
         queryClient.invalidateQueries({ queryKey: getGetSessionHistoryQueryKey({ userAddress: user!.userAddress }) })
       },
       onError: (err) => toast({ title: "Disconnection Error", description: err.message, variant: "destructive" })
@@ -247,7 +248,7 @@ export default function Dashboard() {
               <Clock className="w-5 h-5 text-primary" />
               Recent Sessions
             </CardTitle>
-            <CardDescription>Your metadata is stored on the Zama fhEVM as encrypted ciphertexts.</CardDescription>
+            <CardDescription>Session metadata stays encrypted; provider payouts are settled instantly on Flow.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -277,17 +278,25 @@ export default function Dashboard() {
                           }`}>
                           {s.status}
                         </span>
+                        {s.settlementStatus && (
+                          <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {s.settlementStatus}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {s.status === 'active' ? (
                           <span className="text-primary animate-pulse">Recording...</span>
                         ) : (
-                          <FheBadge value={s.encryptedDuration} label="FHE Duration" />
+                          <span className="font-mono text-xs">{s.encryptedDuration || "-"}</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {s.status === 'active' ? '-' : (
-                          <FheBadge value={s.encryptedAmount} label="FHE Payment Amount" />
+                        {s.status === 'active' ? "-" : `${s.settlementAmount || "0"} ${s.settlementToken || "FLOW"}`}
+                        {s.settlementTxHash && (
+                          <div className="text-[10px] text-muted-foreground font-mono mt-1">
+                            {s.settlementTxHash.substring(0, 12)}...
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
@@ -309,7 +318,7 @@ export default function Dashboard() {
               Protect Me Autopilot
             </CardTitle>
             <CardDescription>
-              Set a budget. Flow schedules the transactions. Zama processes them blindly.
+              Set a budget cap. Session payouts are submitted on Flow.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -418,7 +427,7 @@ export default function Dashboard() {
               <CardTitle className="text-lg text-primary">2. FHE Confidentiality</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground leading-relaxed">
-              X4PN encrypts all session metadata using Fully Homomorphic Encryption before it leaves your device. The smart contract calculates your payment blindly — it deducts your balance without ever decrypting the numbers.
+              X4PN encrypts session metadata before transport. Payout execution happens on Flow while preserving minimal metadata exposure in the app backend.
             </CardContent>
           </Card>
           <Card className="bg-card/40 border-border/50 hover:border-secondary/50 transition-colors">
@@ -426,7 +435,7 @@ export default function Dashboard() {
               <CardTitle className="text-lg text-secondary">3. Flow Usability</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground leading-relaxed">
-              Privacy usually means terrible UX. We use Flow's Account Abstraction so you log in with FaceID. Flow Autopilots automatically trigger the Zama FHE settlement layer when your budget needs replenishing.
+              Privacy usually means terrible UX. We use Flow account abstraction patterns so onboarding feels Web2-native, while settlement stays low-friction and instant.
             </CardContent>
           </Card>
         </div>

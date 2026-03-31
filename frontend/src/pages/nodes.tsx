@@ -46,8 +46,8 @@ export default function Nodes() {
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.name || !formData.evmAddress || !formData.location) {
-      toast({ title: "Validation Error", description: "Name, EVM address, and location are required", variant: "destructive" })
+    if (!formData.name || !formData.evmAddress || !formData.flowAddress || !formData.location) {
+      toast({ title: "Validation Error", description: "Name, EVM address, Flow address, and location are required", variant: "destructive" })
       return
     }
     registerMutation.mutate({
@@ -55,7 +55,7 @@ export default function Nodes() {
         name: formData.name,
         location: formData.location,
         evmAddress: formData.evmAddress,
-        flowAddress: formData.flowAddress || undefined,
+        flowAddress: formData.flowAddress,
       },
     })
   }
@@ -112,7 +112,7 @@ export default function Nodes() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Flow Address (Optional)</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Flow EVM Address</label>
                 <Input
                   placeholder="0x..."
                   value={formData.flowAddress}
